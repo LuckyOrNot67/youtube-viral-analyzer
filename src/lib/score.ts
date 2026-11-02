@@ -67,7 +67,8 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
   const eMed = median(comp.map(engagementOf).filter((x): x is number => x !== null));
   let E = 0.33, eShr: number | null = null;
   if (eRaw !== null) {
-    const prior = eMed ?? 0.04;
+    // Une chaîne sans aucun like ni commentaire donnerait une division par zéro.
+    const prior = eMed ? eMed : 0.04;
     eShr = (eRaw * v.views + prior * LISSAGE) / (v.views + LISSAGE);
     E = clamp((Math.log2(eShr / prior) + 1) / 3);
   }

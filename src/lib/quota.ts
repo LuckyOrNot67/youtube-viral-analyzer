@@ -51,7 +51,11 @@ export function usageOf(user: string, kind: Kind): number {
   return row?.n ?? 0;
 }
 
+// Pour tester en local sans limite par personne (jamais en production). Les quotas YouTube restent appliqués.
+const SANS_LIMITES = process.env.NODE_ENV !== "production" && process.env.SANS_LIMITES === "1";
+
 export function assertUsage(user: string, kind: Kind) {
+  if (SANS_LIMITES) return;
   const lim = LIMITES.parUtilisateurParJour[kind];
   if (usageOf(user, kind) >= lim) throw new QuotaError(`Tu as utilisé tes ${lim} ${LABEL[kind]} d'aujourd'hui. Ça repart demain.`, "utilisateur");
 }

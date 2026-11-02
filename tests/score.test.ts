@@ -23,6 +23,12 @@ test("une vidéo à 8× la normale de sa chaîne a un gros score, confiance haut
   assert.match(s.raisons[0], /les vues habituelles/);
 });
 
+test("chaîne sans aucun like ni commentaire : le score reste un nombre", () => {
+  const pool = Array.from({ length: 8 }, (_, i) => vid({ views: 4, age: 3 + i, likes: 0, comments: 0 }));
+  const s = scoreVideo(pool[0], pool, { now: NOW });
+  assert.ok(Number.isFinite(s.score), `score ${s.score}`);
+});
+
 test("une vidéo dans la normale reste moyenne", () => {
   const pool = channel();
   const v = vid({ views: 50_000, age: 20 });
