@@ -1,7 +1,7 @@
 # Brief pour ChatGPT : relire Viral Analyzer et dire ce qui ne va pas
 
-- **Code :** {{REPO}}
-- **App en ligne (temporaire) :** {{APP}}
+- **Code :** https://github.com/LuckyOrNot67/youtube-viral-analyzer
+- **App en ligne (temporaire) :** https://travel-name-organisms-hollywood.trycloudflare.com (marche tant que mon ordinateur est allumé)
 
 Je suis le fondateur. Je ne code pas : réponds en français simple et va droit au but.
 

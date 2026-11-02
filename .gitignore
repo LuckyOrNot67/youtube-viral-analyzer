@@ -11,3 +11,4 @@ npm-debug.log*
 next-env.d.ts
 # base locale, cache, yt-dlp, Shorts générés
 /.cache
+/.next-prod/
