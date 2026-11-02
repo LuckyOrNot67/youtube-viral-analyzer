@@ -12,13 +12,14 @@ const Body = z.object({
   n: z.number().int().optional(),
   periode: z.enum(["24h", "7j", "30j", "90j", "tout"]).optional(),
   duree: z.enum(["toutes", "shorts", "longues"]).optional(),
+  langue: z.enum(["fr", "toutes"]).optional(),
 });
 
 export async function POST(req: Request) {
   try {
     const body = Body.safeParse(await req.json().catch(() => null));
     if (!body.success) throw new UserError("Recherche invalide.");
-    const { q, periode, duree } = body.data;
+    const { q, periode, duree, langue } = body.data;
     const n = LIMITES.videosParChaine.includes(body.data.n ?? 0) ? body.data.n! : 200;
     const uid = await userId();
     const p = parseInput(q);
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     }
     if (p.kind === "topic") {
       assertUsage(uid, "sujets");
-      const r = await analyzeTopic(p.q, { periode: periode ?? "30j", duree: duree ?? "toutes" });
+      const r = await analyzeTopic(p.q, { periode: periode ?? "7j", duree: duree ?? "toutes", langue: langue ?? "fr" });
       if (!r.cache) countUsage(uid, "sujets"); // une recherche déjà en cache ne coûte rien : on ne la décompte pas
       return NextResponse.json(r);
     }

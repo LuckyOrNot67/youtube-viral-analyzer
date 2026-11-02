@@ -1,4 +1,4 @@
-import type { Confiance } from "@/lib/types";
+import type { Confiance, Score } from "@/lib/types";
 
 // Petits éléments d'affichage partagés (sans état).
 
@@ -35,4 +35,13 @@ export function ScoreBadge({ score, big }: { score: number; big?: boolean }) {
 
 export function Conf({ c }: { c: Confiance }) {
   return <span className={`conf ${c}`}>Confiance {c}</span>;
+}
+
+/** La raison en quelques mots : ce qui fait choisir cette vidéo plutôt qu'une autre. */
+export function punch(s: Score): string {
+  const r = s.base.ratio;
+  if (r !== null && r >= 1.5) return `${r >= 10 ? Math.round(r) : fmtScore(r)}× plus de vues que d'habitude`;
+  if (r !== null && r < 0.8) return "Moins de vues que d'habitude";
+  if (r !== null) return "Dans la moyenne de la chaîne";
+  return `${fmtNum(s.vuesParJour)} vues par jour`;
 }

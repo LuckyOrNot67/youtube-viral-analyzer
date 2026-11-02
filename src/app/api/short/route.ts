@@ -28,8 +28,9 @@ export async function POST(req: Request) {
     if (end > video.duration + 1) throw new UserError("Ce passage dépasse la fin de la vidéo.");
     const uid = await userId();
     assertUsage(uid, "shorts");
-    const job = startShort({ videoId, start, end, cadrage, uid });
-    if (job.etat === "attente") countUsage(uid, "shorts");
+    // Le même Short redemandé (double clic, rechargement) n'est ni refait ni décompté.
+    const { job, nouveau } = startShort({ videoId, start, end, cadrage, uid });
+    if (nouveau) countUsage(uid, "shorts");
     return NextResponse.json({ id: job.id });
   } catch (e) {
     return fail(e);

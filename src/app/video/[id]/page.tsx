@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Download, Loader2, MessageCircle, Play, Scissors, Sparkles } from "lucide-react";
-import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, ScoreBadge } from "@/components/bits";
+import { Download, Flame, Loader2, MessageCircle, Play, Scissors, Sparkles } from "lucide-react";
+import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/types";
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
@@ -51,53 +51,37 @@ export default function VideoPage() {
         <h1 className="h h-m">{v.title}</h1>
         <Link href={`/resultats?q=${encodeURIComponent(channel.id)}`} className="row small" style={{ gap: 8 }}>
           {channel.avatar && <img referrerPolicy="no-referrer" src={channel.avatar} alt="" style={{ width: 22, height: 22, borderRadius: "50%" }} />}
-          <span><b style={{ color: "var(--text)" }}>{channel.title}</b> · {channel.subs === null ? "abonnés masqués" : `${fmtNum(channel.subs)} abonnés`} · voir toute la chaîne</span>
+          <span><b style={{ color: "var(--text)" }}>{channel.title}</b> · voir la chaîne</span>
         </Link>
       </div>
 
-      <div className="card ink" style={{ gap: 12 }}>
-        <div className="row between wrap-row">
-          <div className="col" style={{ gap: 2 }}>
-            <span className="small" style={{ color: "inherit", opacity: 0.7 }}>Score d&apos;explosion</span>
-            <b style={{ fontSize: 18 }}>{s.label}</b>
+      <div className="card ink" style={{ gap: 10 }}>
+        <div className="row between" style={{ alignItems: "center" }}>
+          <div className="col" style={{ gap: 4 }}>
+            <p className="punch" style={{ fontSize: 17 }}><Flame size={18} /> {punch(s)}</p>
+            <span className="small" style={{ color: "inherit", opacity: 0.75 }}>{fmtNum(v.views)} vues · {fmtAge(s.ageJours)}</span>
           </div>
           <ScoreBadge score={s.score} big />
         </div>
-        <ul className="list">{s.raisons.map((r) => <li key={r}>{r}</li>)}</ul>
-        <p className="small" style={{ color: "inherit", opacity: 0.75 }}>
-          <Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}.` : "."} Ce score compare la vidéo à sa chaîne : ce n&apos;est pas une probabilité de devenir virale.
-        </p>
-      </div>
-
-      <div className="grid-stats">
-        <Stat k="vues" v={fmtNum(v.views)} />
-        <Stat k={s.vitesseMesuree ? "vues/jour (mesuré)" : "vues/jour en moyenne"} v={fmtNum(s.vuesParJour)} />
-        <Stat k="likes" v={fmtNum(v.likes)} />
-        <Stat k="commentaires" v={fmtNum(v.comments)} />
-        <Stat k="durée" v={fmtDur(v.duration)} />
-        <Stat k="publiée" v={fmtAge(s.ageJours)} />
-      </div>
-
-      <div className="card">
-        <b>Le détail du score</b>
-        <Crit label="Surperformance" p={s.parts.surperformance} poids="50 %" />
-        <Crit label="Vitesse" p={s.parts.vitesse} poids="25 %" />
-        <Crit label="Engagement" p={s.parts.engagement} poids="15 %" />
-        <Crit label="Récence" p={s.parts.recence} poids="10 %" />
-        <p className="small">
-          {s.base.median !== null
-            ? `Comparée à ${s.base.n} vidéos ${s.isShort ? "Shorts" : "longues"} de la chaîne d'âge proche : ${fmtNum(s.base.median)} vues en médiane, soit ${s.base.ratio !== null ? fmtScore(s.base.ratio) + "×" : "—"} pour celle-ci.`
-            : "Pas assez de vidéos comparables sur la chaîne pour mesurer la surperformance."}
-          {" "}Chiffres relevés {fmtAge((Date.now() - v.fetchedAt) / 86400_000)}.
-        </p>
+        <details className="more">
+          <summary style={{ color: "inherit", opacity: 0.7 }}>Comment c&apos;est calculé</summary>
+          <div className="col" style={{ gap: 8 }}>
+            <ul className="list">{s.raisons.map((r) => <li key={r}>{r}</li>)}</ul>
+            <Crit label="Surperformance" p={s.parts.surperformance} />
+            <Crit label="Vitesse" p={s.parts.vitesse} />
+            <Crit label="Engagement" p={s.parts.engagement} />
+            <Crit label="Récence" p={s.parts.recence} />
+            <p className="small" style={{ color: "inherit", opacity: 0.75 }}><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
+          </div>
+        </details>
       </div>
 
       {!s.isShort && <Extraits video={v} onSeek={seek} />}
       <Comments videoId={v.id} onSeek={seek} />
 
       {d.voisines.length > 0 && (
-        <div className="col" style={{ gap: 8 }}>
-          <b>Les autres vidéos de la chaîne qui marchent</b>
+        <div className="col" style={{ gap: 6 }}>
+          <h2 className="h h-s">Aussi sur la chaîne</h2>
           {d.voisines.map((o) => (
             <Link key={o.id} href={`/video/${o.id}`} className="row between card" style={{ flexDirection: "row", padding: "10px 14px" }}>
               <span className="vtitle" style={{ fontSize: 14 }}>{o.title}</span>
@@ -110,25 +94,23 @@ export default function VideoPage() {
   );
 }
 
-function Stat({ k, v }: { k: string; v: string }) {
-  return <div className="stat"><span className="v">{v}</span><span className="k">{k}</span></div>;
-}
-
-function Crit({ label, p, poids }: { label: string; p: number; poids: string }) {
+function Crit({ label, p }: { label: string; p: number }) {
   return (
     <div className="crit">
-      <span>{label} <span className="small">({poids})</span></span>
+      <span>{label}</span>
       <div className="bar"><span style={{ width: `${Math.round(p * 100)}%` }} /></div>
       <span className="p">{Math.round(p * 100)}</span>
     </div>
   );
 }
 
+type Passage = { start: number; end: number; hook: string; note: number | null };
+
 function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
   const [state, setState] = useState<"idle" | "load" | "done">("idle");
   const [res, setRes] = useState<ExtraitsRes | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [sel, setSel] = useState<number | null>(null);
+  const [made, setMade] = useState<Set<number>>(new Set());
   const [t0, setT0] = useState(0);
 
   const run = () => {
@@ -138,70 +120,55 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
       .catch((e) => { setErr(e.message); setState("idle"); });
   };
 
+  // Les passages de l'IA, sinon les moments cités dans les commentaires (45 s autour).
+  const passages: Passage[] = res
+    ? res.extraits.length
+      ? res.extraits.map((x) => ({ start: x.start, end: x.end, hook: x.hook, note: x.scoreShorts }))
+      : res.moments.map((m) => ({ start: Math.max(0, m.t - 3), end: Math.min(video.duration, m.t + 42), hook: m.exemples[0], note: null }))
+    : [];
+
   return (
     <section className="col" style={{ gap: 10 }}>
-      <div className="row between"><h2 className="h h-s">Meilleurs extraits pour des Shorts</h2></div>
-      {state === "idle" && (
-        <>
-          <button className="btn accent" onClick={run}><Sparkles size={18} /> Trouver les meilleurs extraits</button>
-          <p className="small">L&apos;IA regarde la vidéo ({fmtDur(video.duration)}) et lit les commentaires. Compte 1 à 3 minutes.</p>
-        </>
-      )}
-      {state === "load" && <Waiting since={t0} label="L'IA regarde la vidéo et repère les passages…" />}
+      {state === "idle" && <button className="btn accent" onClick={run}><Sparkles size={18} /> Trouver les Shorts</button>}
+      {state === "load" && <Waiting since={t0} label="L'IA regarde la vidéo…" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
-      {res?.avertissement && <div className="notice">{res.avertissement}</div>}
-      {res?.extraits.map((x, i) => (
-        <div key={`${x.start}-${x.end}`} className={`extrait${sel === i ? " on" : ""}`}>
-          <div className="row between wrap-row">
-            <span className="time">{fmtDur(x.start)} → {fmtDur(x.end)} · {x.end - x.start} s</span>
-            <span className="row" style={{ gap: 6 }}>
-              {x.citations > 0 && <span className="chip sm good">Cité {x.citations}× en commentaires</span>}
-              <span className="score s-up" title="Potentiel Shorts">{fmtScore(x.scoreShorts)}<small>/10</small></span>
-            </span>
-          </div>
-          <p className="hook">« {x.hook} »</p>
-          <p className="small" style={{ color: "var(--text)" }}><b>{x.titre}</b> · {x.type}</p>
-          <p className="small">{x.resume}{x.justification ? ` ${x.justification}` : ""}</p>
-          <div className="row wrap-row">
-            <button className="btn ghost sm" onClick={() => onSeek(x.start, x.end)}><Play size={15} /> Voir le passage</button>
-            <button className="btn sm" onClick={() => setSel(sel === i ? null : i)}><Scissors size={15} /> Créer le Short</button>
-          </div>
-          {sel === i && <ExportShort videoId={video.id} start={x.start} end={x.end} />}
-        </div>
-      ))}
-      {res && res.source === "commentaires" && res.moments.length > 0 && (
-        <div className="col" style={{ gap: 8 }}>
-          {res.moments.map((m) => (
-            <div key={m.t} className="extrait">
-              <div className="row between"><span className="time">{fmtDur(m.t)}</span><span className="chip sm good">Cité {m.n}×</span></div>
-              <p className="small">« {m.exemples[0]} »</p>
-              <div className="row wrap-row">
-                <button className="btn ghost sm" onClick={() => onSeek(Math.max(0, m.t - 3))}><Play size={15} /> Voir</button>
-              </div>
-              <ExportShortInline videoId={video.id} start={Math.max(0, m.t - 3)} end={Math.min(video.duration, m.t + 42)} />
+      {res && !passages.length && <p className="sub">Aucun passage trouvé.</p>}
+      {passages.length > 0 && (
+        <div className="shorts">
+          {passages.map((x, i) => (
+            <div key={`${x.start}-${x.end}`} className={`sc${made.has(i) ? " wide" : ""}`}>
+              <button className="sc-play" onClick={() => onSeek(x.start, x.end)} aria-label={`Voir le passage à ${fmtDur(x.start)}`}>
+                <span className="row between">
+                  <span className="sc-time"><Play size={12} fill="currentColor" /> {fmtDur(x.start)}</span>
+                  {x.note !== null && <span className="sc-note">{fmtScore(x.note)}</span>}
+                </span>
+                <span className="sc-hook">{x.hook}</span>
+              </button>
+              {made.has(i)
+                ? <ExportShort videoId={video.id} start={x.start} end={x.end} />
+                : <button className="btn sm" onClick={() => setMade(new Set(made).add(i))}><Scissors size={15} /> Créer</button>}
             </div>
           ))}
         </div>
       )}
-      {res && !res.extraits.length && !res.moments.length && <p className="sub">Aucun passage exploitable trouvé.</p>}
     </section>
   );
 }
 
-function ExportShortInline(p: { videoId: string; start: number; end: number }) {
-  const [open, setOpen] = useState(false);
-  if (!open) return <button className="btn sm" style={{ alignSelf: "flex-start" }} onClick={() => setOpen(true)}><Scissors size={15} /> Créer un Short de 45 s ici</button>;
-  return <ExportShort {...p} />;
-}
-
 type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur"; progression: number; erreur: string | null };
 
+/** Lance le Short dès l'ouverture : image entière sur fond flou, sans réglage. */
 function ExportShort({ videoId, start, end }: { videoId: string; start: number; end: number }) {
   const [cadrage, setCadrage] = useState<"entier" | "centre">("entier");
-  const [s, setS] = useState(start);
-  const [e, setE] = useState(end);
   const [job, setJob] = useState<{ id: string; j: Job } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setErr(null); setJob(null);
+    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, cadrage }) })
+      .then(({ id }) => setJob({ id, j: { etat: "attente", progression: 0, erreur: null } }))
+      .catch((x) => setErr(x.message));
+  }, [videoId, start, end, cadrage]);
 
   useEffect(() => {
     if (!job || job.j.etat === "pret" || job.j.etat === "erreur") return;
@@ -211,62 +178,21 @@ function ExportShort({ videoId, start, end }: { videoId: string; start: number; 
     return () => clearTimeout(t);
   }, [job]);
 
-  const go = () => {
-    setErr(null);
-    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start: s, end: e, cadrage }) })
-      .then(({ id }) => setJob({ id, j: { etat: "attente", progression: 0, erreur: null } }))
-      .catch((x) => setErr(x.message));
-  };
-
-  const busy = job && job.j.etat !== "pret" && job.j.etat !== "erreur";
-  const label = job?.j.etat === "telechargement" ? "Récupération du passage…" : job?.j.etat === "montage" ? "Mise au format vertical…" : "Préparation…";
-
+  const fail = err ?? job?.j.erreur;
+  if (fail) return <div className="notice bad" role="alert">{fail}</div>;
+  if (job?.j.etat !== "pret") {
+    return <div className="bar" aria-label="Création du Short"><span style={{ width: `${Math.max(5, Math.round((job?.j.progression ?? 0) * 100))}%`, transition: "width .4s" }} /></div>;
+  }
   return (
-    <div className="col" style={{ gap: 10, paddingTop: 6, borderTop: "1px solid var(--line)" }}>
-      {job?.j.etat === "pret" ? (
-        <div className="export">
-          <video src={`/api/short/${job.id}?fichier=1`} controls playsInline />
-          <div className="col">
-            <b>Ton Short est prêt</b>
-            <p className="small">MP4 vertical 1080×1920, son égalisé, {e - s} s. Ajoute tes textes et ta musique dans TikTok, Reels ou Shorts.</p>
-            <a className="btn" href={`/api/short/${job.id}?fichier=1&telecharger=1`} download><Download size={18} /> Télécharger le MP4</a>
-            <button className="btn ghost sm" onClick={() => setJob(null)}>Refaire avec un autre réglage</button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <p className="small">Cadrage : {cadrage === "entier" ? "toute l'image, sur un fond flou" : "recadré au centre, remplit l'écran"}.</p>
-          <div className="segmented" role="radiogroup" aria-label="Cadrage">
-            <button className={cadrage === "entier" ? "on" : ""} onClick={() => setCadrage("entier")} disabled={!!busy}>Image entière</button>
-            <button className={cadrage === "centre" ? "on" : ""} onClick={() => setCadrage("centre")} disabled={!!busy}>Plein écran</button>
-          </div>
-          <div className="col small" style={{ gap: 6 }}>
-            <div className="row between">Début <Nudge v={s} set={setS} min={0} max={e - 10} disabled={!!busy} /></div>
-            <div className="row between">Fin <Nudge v={e} set={setE} min={s + 10} max={s + 90} disabled={!!busy} /></div>
-            <div className="row between">Durée <b style={{ color: "var(--text)" }}>{e - s} s</b></div>
-          </div>
-          {busy ? (
-            <div className="col" style={{ gap: 6 }}>
-              <div className="row small"><Loader2 size={15} className="spin" /> {label}</div>
-              <div className="bar"><span style={{ width: `${Math.round((job?.j.progression ?? 0) * 100)}%`, transition: "width .4s" }} /></div>
-            </div>
-          ) : (
-            <button className="btn" onClick={go}>Générer le Short <span className="arrow"><ArrowUpRight size={16} strokeWidth={2.5} /></span></button>
-          )}
-          {(err || job?.j.erreur) && <div className="notice bad" role="alert">{err ?? job?.j.erreur}</div>}
-        </>
-      )}
+    <div className="export">
+      <video src={`/api/short/${job.id}?fichier=1`} controls playsInline />
+      <div className="col">
+        <a className="btn" href={`/api/short/${job.id}?fichier=1&telecharger=1`} download><Download size={18} /> Télécharger</a>
+        <button className="btn ghost sm" onClick={() => setCadrage(cadrage === "entier" ? "centre" : "entier")}>
+          {cadrage === "entier" ? "Version plein écran" : "Version image entière"}
+        </button>
+      </div>
     </div>
-  );
-}
-
-function Nudge({ v, set, min, max, disabled }: { v: number; set: (n: number) => void; min: number; max: number; disabled?: boolean }) {
-  return (
-    <span className="row" style={{ gap: 4 }}>
-      <button className="chip sm" disabled={disabled || v - 1 < min} onClick={() => set(v - 1)} aria-label="Une seconde plus tôt">−1 s</button>
-      <span className="time">{fmtDur(v)}</span>
-      <button className="chip sm" disabled={disabled || v + 1 > max} onClick={() => set(v + 1)} aria-label="Une seconde plus tard">+1 s</button>
-    </span>
   );
 }
 
@@ -282,27 +208,24 @@ function Comments({ videoId, onSeek }: { videoId: string; onSeek: (s: number) =>
   };
   return (
     <section className="col" style={{ gap: 10 }}>
-      <h2 className="h h-s">Ce que disent les spectateurs</h2>
-      {!res && !load && <button className="btn ghost" onClick={run}><MessageCircle size={18} /> Analyser les commentaires</button>}
-      {load && <Waiting since={t0} label="Lecture des commentaires…" />}
+      {!res && !load && <button className="btn ghost" onClick={run}><MessageCircle size={18} /> Ce que disent les spectateurs</button>}
+      {(res || load) && <h2 className="h h-s">Ce que disent les spectateurs</h2>}
+      {load && <Waiting since={t0} label="Lecture…" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res && (
         <div className="col" style={{ gap: 10 }}>
-          <p className="small">{res.lus} commentaires les plus pertinents lus{res.total !== null ? ` sur ${fmtNum(res.total)}` : ""}.</p>
           {res.moments.length > 0 && (
             <div className="card green">
-              <b>Moments cités par les spectateurs</b>
+              <b>Moments cités</b>
               {res.moments.slice(0, 5).map((m) => (
                 <button key={m.t} className="row" style={{ background: "none", border: 0, padding: 0, textAlign: "left", alignItems: "flex-start" }} onClick={() => onSeek(Math.max(0, m.t - 3))}>
                   <span className="time" style={{ color: "var(--good)", minWidth: 52 }}>{fmtDur(m.t)}</span>
-                  <span className="small" style={{ color: "var(--text)" }}>Cité {m.n}× · « {m.exemples[0]} »</span>
+                  <span className="small" style={{ color: "var(--text)" }}>« {m.exemples[0]} »</span>
                 </button>
               ))}
             </div>
           )}
-          {res.sujets.length > 0 && <div className="card"><b>Sujets</b><ul className="list">{res.sujets.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-          {res.questions.length > 0 && <div className="card blue"><b>Questions qui reviennent</b><ul className="list">{res.questions.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-          <div className="card"><b>Réactions</b><p className="small" style={{ color: "var(--text)" }}>{res.reactions}</p></div>
+          {res.questions.length > 0 && <div className="card blue"><b>Leurs questions</b><ul className="list">{res.questions.map((x) => <li key={x}>{x}</li>)}</ul></div>}
           {res.idees.length > 0 && <div className="card pink"><b>Idées de Shorts</b><ul className="list">{res.idees.map((x) => <li key={x}>{x}</li>)}</ul></div>}
         </div>
       )}

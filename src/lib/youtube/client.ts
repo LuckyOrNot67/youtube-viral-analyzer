@@ -43,7 +43,7 @@ const bestThumb = (t?: Thumbs) => t?.maxres?.url ?? t?.high?.url ?? t?.medium?.u
 
 type ChannelItem = {
   id: string;
-  snippet: { title: string; description: string; customUrl?: string; thumbnails: Thumbs };
+  snippet: { title: string; description: string; customUrl?: string; thumbnails: Thumbs; country?: string };
   statistics: { subscriberCount?: string; hiddenSubscriberCount: boolean; videoCount: string };
   contentDetails: { relatedPlaylists: { uploads: string } };
 };
@@ -57,6 +57,7 @@ const toChannel = (c: ChannelItem): Channel => ({
   subs: c.statistics.hiddenSubscriberCount || c.statistics.subscriberCount === undefined ? null : Number(c.statistics.subscriberCount),
   videoCount: Number(c.statistics.videoCount),
   uploads: c.contentDetails.relatedPlaylists.uploads,
+  country: c.snippet.country ?? null,
 });
 
 const CHANNEL_PARTS = "snippet,statistics,contentDetails";
@@ -95,7 +96,7 @@ export async function uploadIds(uploads: string, n: number): Promise<string[]> {
 
 type VideoItem = {
   id: string;
-  snippet: { channelId: string; channelTitle: string; title: string; description: string; publishedAt: string; thumbnails: Thumbs; liveBroadcastContent?: string };
+  snippet: { channelId: string; channelTitle: string; title: string; description: string; publishedAt: string; thumbnails: Thumbs; liveBroadcastContent?: string; defaultAudioLanguage?: string; defaultLanguage?: string };
   contentDetails: { duration: string };
   statistics: { viewCount?: string; likeCount?: string; commentCount?: string };
 };
@@ -115,6 +116,7 @@ export async function videosByIds(ids: string[]): Promise<Video[]> {
         duration: isoDuration(v.contentDetails.duration), views: Number(v.statistics.viewCount),
         likes: v.statistics.likeCount === undefined ? null : Number(v.statistics.likeCount),
         comments: v.statistics.commentCount === undefined ? null : Number(v.statistics.commentCount),
+        lang: (v.snippet.defaultAudioLanguage ?? v.snippet.defaultLanguage ?? null)?.toLowerCase() ?? null,
         fetchedAt: now,
       });
     }
@@ -126,7 +128,8 @@ export async function videosByIds(ids: string[]): Promise<Video[]> {
 export type SearchFilters = {
   periode?: "24h" | "7j" | "30j" | "90j" | "tout";
   duree?: "toutes" | "shorts" | "longues";
-  langue?: string;
+  /** « fr » (par défaut) : seulement les vidéos en français ; « toutes » : aucun tri par langue. */
+  langue?: "fr" | "toutes";
 };
 
 const PERIODE_JOURS = { "24h": 1, "7j": 7, "30j": 30, "90j": 90 } as const;
@@ -135,10 +138,13 @@ const PERIODE_JOURS = { "24h": 1, "7j": 7, "30j": 30, "90j": 90 } as const;
 export async function searchVideoIds(q: string, f: SearchFilters, pageToken?: string): Promise<{ ids: string[]; next?: string; total: number }> {
   const after = f.periode && f.periode !== "tout" ? new Date(Date.now() - PERIODE_JOURS[f.periode] * 86400_000).toISOString() : undefined;
   const r = await call<{ items?: { id: { videoId?: string } }[]; nextPageToken?: string; pageInfo?: { totalResults?: number } }>("search", {
-    part: "id", type: "video", q, maxResults: 50, order: "viewCount", publishedAfter: after, pageToken,
+    part: "id", type: "video", q, maxResults: 50, publishedAfter: after, pageToken,
+    // Trier par vues renvoie presque uniquement des vidéos étrangères (mesuré : 0 sur 50 en français pour « #minecraft »).
+    // Par pertinence, YouTube tient compte de la langue (31 sur 50) ; notre score fait ensuite le classement.
+    order: f.langue === "toutes" ? "viewCount" : "relevance",
     // L'API classe en « short » (< 4 min), « medium » (4-20 min), « long » (> 20 min) : on affine ensuite sur la vraie durée.
     videoDuration: f.duree === "shorts" ? "short" : undefined,
-    relevanceLanguage: f.langue ?? "fr", regionCode: "FR", safeSearch: "moderate",
+    relevanceLanguage: f.langue === "toutes" ? undefined : "fr", regionCode: f.langue === "toutes" ? undefined : "FR", safeSearch: "moderate",
   }, "recherches");
   return { ids: [...new Set((r.items ?? []).map((i) => i.id.videoId).filter((x): x is string => Boolean(x)))], next: r.nextPageToken, total: r.pageInfo?.totalResults ?? 0 };
 }

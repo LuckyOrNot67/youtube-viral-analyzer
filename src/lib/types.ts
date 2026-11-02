@@ -10,6 +10,8 @@ export type Channel = {
   subs: number | null;
   videoCount: number;
   uploads: string;
+  /** Pays déclaré par la chaîne (FR, BE, IN…), souvent absent. */
+  country: string | null;
 };
 
 export type Video = {
@@ -25,6 +27,8 @@ export type Video = {
   /** null si les likes ou commentaires sont masqués ou désactivés. */
   likes: number | null;
   comments: number | null;
+  /** Langue déclarée de la vidéo (« fr », « en-US », « hi »…), souvent absente. */
+  lang: string | null;
   /** Relevé (ms) : sert à dater la fraîcheur des chiffres. */
   fetchedAt: number;
 };

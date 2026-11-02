@@ -39,6 +39,13 @@ npm test             # score, lecture des liens, moments cités
 - Extraits d'une vidéo de 19 min : 28 s.
 - Short de 46 s : environ 45 s.
 
+## Recherche par sujet
+
+- Vidéos **en français** des **7 derniers jours**, sans réglage à l'écran (l'API accepte encore `langue` et `periode`).
+- Le français est détecté avec la langue déclarée de la vidéo, l'écriture du titre (les écritures indiennes, arabes et asiatiques sont exclues), le pays de la chaîne et les mots du titre (`src/lib/lang.ts`, testé).
+- YouTube trie par pertinence. Trier par vues ne renvoyait presque que des vidéos étrangères (mesuré : 0 sur 50 en français pour « #minecraft », contre 31 sur 50 par pertinence). Notre score fait ensuite le classement.
+- Jusqu'à 3 pages de 50 vidéos tant qu'on n'a pas 20 vidéos qui passent les filtres. Chaque page compte pour 1 des 100 recherches du jour.
+
 ## Quotas
 
 - **YouTube** : 10 000 unités et 100 recherches par sujet par jour pour toute l'app, remis à zéro à minuit heure du Pacifique. Les deux compteurs sont tenus dans la base, avec une réserve et des alertes à 70, 85 et 95 %.

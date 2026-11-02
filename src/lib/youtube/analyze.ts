@@ -1,5 +1,6 @@
 import "server-only";
 import { cached, purge } from "../db";
+import { isFrench } from "../lang";
 import { parseInput, type Parsed } from "../parse";
 import { rank, scoreVideo, SHORT_MAX } from "../score";
 import type { Channel, ScoredVideo, SearchResult, Video } from "../types";
@@ -49,29 +50,53 @@ export async function analyzeChannel(p: Extract<Parsed, { kind: "handle" | "chan
   };
 }
 
+/** Pages de recherche au plus (1 page = 50 vidéos = 1 des 100 recherches du jour). */
+const MAX_PAGES = 3;
+/** On arrête de chercher plus loin dès qu'on a assez de vidéos qui passent les filtres. */
+const ASSEZ = 20;
+
 export async function analyzeTopic(q: string, f: SearchFilters): Promise<SearchResult> {
   purge();
-  const fk = `${f.periode ?? "tout"}:${f.duree ?? "toutes"}:${f.langue ?? "fr"}`;
-  const ids = await cached(`sujet:${q.toLowerCase()}:${fk}`, H.sujetHeures, async () => (await searchVideoIds(q, f)).ids);
-  const { value: videos } = await cached(`sujet-stats:${q.toLowerCase()}:${fk}`, H.videoHeures, () => videosByIds(ids.value));
-  const kept = videos.filter((v) => (f.duree === "shorts" ? v.duration <= SHORT_MAX : f.duree === "longues" ? v.duration > SHORT_MAX : true));
-  if (!kept.length) throw new YouTubeError("Aucune vidéo trouvée pour ce sujet avec ces filtres.", 404);
+  const langue = f.langue ?? "fr";
+  const fk = `${f.periode ?? "7j"}:${f.duree ?? "toutes"}:${langue}`;
+  const passes = (v: Video, chans: Map<string, Channel>) =>
+    (f.duree === "shorts" ? v.duration <= SHORT_MAX : f.duree === "longues" ? v.duration > SHORT_MAX : true)
+    && (langue !== "fr" || isFrench({ lang: v.lang, title: v.title, description: v.description, channelCountry: chans.get(v.channelId)?.country ?? null }));
+
+  // Recherche, statistiques et chaînes, page par page, jusqu'à avoir assez de vidéos dans la bonne langue.
+  const { value: found, hit } = await cached(`sujet:${q.toLowerCase()}:${fk}`, H.videoHeures, async () => {
+    const videos: Video[] = [], chans = new Map<string, Channel>();
+    let next: string | undefined, pages = 0, vues = 0;
+    do {
+      const r = await searchVideoIds(q, f, next);
+      pages++; next = r.next;
+      const vs = await videosByIds(r.ids.filter((id) => !videos.some((v) => v.id === id)));
+      vues += vs.length;
+      const missing = [...new Set(vs.map((v) => v.channelId))].filter((id) => !chans.has(id));
+      for (const [id, c] of await channelsByIds(missing)) chans.set(id, c);
+      videos.push(...vs.filter((v) => passes(v, chans)));
+    } while (next && pages < MAX_PAGES && videos.length < ASSEZ);
+    return { videos, chans: [...chans.values()].filter((c) => videos.some((v) => v.channelId === c.id)), vues };
+  });
+  const kept = found.videos;
+  if (!kept.length) throw new YouTubeError(langue === "fr"
+    ? "Aucune vidéo en français trouvée pour ce sujet sur cette période. Essaie une période plus longue ou d'autres mots."
+    : "Aucune vidéo trouvée pour ce sujet avec ces filtres.", 404);
 
   // Chaque vidéo est comparée aux 50 dernières vidéos de SA chaîne (mise en cache 24 h, partagée entre recherches).
-  const chIds = [...new Set(kept.map((v) => v.channelId))];
-  const { value: chans } = await cached(`chs:${chIds.sort().join(",")}`, H.chaineHeures, async () => [...(await channelsByIds(chIds)).values()]);
   const pools = new Map<string, Video[]>();
   // Par groupes de 10 chaînes en parallèle : ~3 s au lieu de ~25 s pour 50 chaînes, sans rafale d'appels.
-  for (let i = 0; i < chans.length; i += 10) {
-    await Promise.all(chans.slice(i, i + 10).map(async (ch) => {
+  for (let i = 0; i < found.chans.length; i += 10) {
+    await Promise.all(found.chans.slice(i, i + 10).map(async (ch) => {
       const { value } = await cached(`base:${ch.id}`, 24, async () => videosByIds(await uploadIds(ch.uploads, BASE_N)));
       pools.set(ch.id, value);
     }));
   }
-  const scored = scoreAll(kept, pools, new Map(chans.map((c) => [c.id, c.subs])));
+  const scored = scoreAll(kept, pools, new Map(found.chans.map((c) => [c.id, c.subs])));
+  const periode = { "24h": "des dernières 24 h", "7j": "des 7 derniers jours", "30j": "des 30 derniers jours", "90j": "des 90 derniers jours", tout: "" }[f.periode ?? "7j"];
   return {
-    type: "sujet", query: q, channel: null, videos: scored, cache: ids.hit, fetchedAt: Math.min(...kept.map((v) => v.fetchedAt)),
-    portee: `${kept.length} vidéos parmi les plus vues que YouTube renvoie pour « ${q} ». Ce n'est pas l'inventaire complet du sujet.`,
+    type: "sujet", query: q, channel: null, videos: scored, cache: hit, fetchedAt: Math.min(...kept.map((v) => v.fetchedAt)),
+    portee: `${kept.length} vidéos ${langue === "fr" ? "en français " : ""}${periode} parmi les ${found.vues} que YouTube renvoie pour « ${q} ». Ce n'est pas l'inventaire complet du sujet.`,
   };
 }
 

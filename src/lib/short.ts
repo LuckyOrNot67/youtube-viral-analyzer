@@ -32,14 +32,14 @@ export const getJob = (id: string) => jobs.get(id) ?? null;
 export const fileOf = (id: string) => path.join(DIR, `${id}.mp4`);
 
 /** Un même passage déjà demandé par la même personne n'est pas refait. */
-export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string }): ShortJob {
+export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string }): { job: ShortJob; nouveau: boolean } {
   const same = [...jobs.values()].find((j) => j.uid === o.uid && j.videoId === o.videoId && j.start === o.start && j.end === o.end && j.cadrage === o.cadrage && j.etat !== "erreur");
-  if (same) return same;
+  if (same) return { job: same, nouveau: false };
   const job: ShortJob = { id: randomUUID(), ...o, etat: "attente", progression: 0, erreur: null, createdAt: Date.now() };
   jobs.set(job.id, job);
   run(job).catch((e) => { job.etat = "erreur"; job.erreur = (e as Error).message; console.warn("[short]", (e as Error).message); });
   cleanup().catch(() => {});
-  return job;
+  return { job, nouveau: true };
 }
 
 /** Filtre vertical : « centre » remplit l'écran (recadré au milieu), « entier » garde toute l'image sur un fond flou. */

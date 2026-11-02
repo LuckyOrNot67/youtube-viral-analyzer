@@ -16,7 +16,7 @@ export function SearchBox({ initial = "", autoFocus }: { initial?: string; autoF
     <form className="search" role="search" onSubmit={(e) => { e.preventDefault(); go(q); }}>
       <Search size={20} aria-hidden style={{ color: "var(--muted)", flexShrink: 0 }} />
       <input id="q" value={q} onChange={(e) => setQ(e.target.value)} autoFocus={autoFocus} enterKeyHint="search"
-        placeholder="Colle une chaîne YouTube ou recherche une niche…" aria-label="Chaîne, vidéo, hashtag ou sujet" autoComplete="off" />
+        placeholder="Une chaîne, un lien ou un sujet" aria-label="Chaîne, vidéo, hashtag ou sujet" autoComplete="off" />
       <button className="btn" type="submit" disabled={!q.trim()} aria-label="Analyser">
         <span className="lbl">Analyser</span> <ArrowUpRight size={18} strokeWidth={2.6} />
       </button>
