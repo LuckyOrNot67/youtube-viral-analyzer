@@ -4,9 +4,12 @@ import { GoogleGenAI } from "@google/genai";
 import { logCost } from "./events";
 
 // Clés dans .env.local uniquement, jamais envoyées au navigateur.
-export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-opus-5-5";
+export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
 const GEMINI_FALLBACKS = ["gemini-3.5-flash", "gemini-3.8-flash"];
+/** Images regardées par seconde de vidéo. Par défaut Gemini en prend environ 1 ; à 0,5, une vidéo de 30 min passe de
+ *  ~103 k à ~66 k jetons, mêmes passages trouvés aux mêmes minutages (mesuré sur 4MphCDK8fWg). Le son reste entier. */
+const GEMINI_FPS = Number(process.env.GEMINI_FPS ?? 0.5);
 
 export const hasClaude = () => Boolean(process.env.ANTHROPIC_API_KEY);
 export const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
@@ -35,7 +38,7 @@ export async function geminiWatchYouTube(videoId: string, prompt: string, projet
     try {
       const res = await ai.interactions.create({
         model,
-        input: [{ type: "video", uri }, { type: "text", text: prompt }],
+        input: [{ type: "video", uri, processing: { type: "static", fps: GEMINI_FPS } }, { type: "text", text: prompt }],
         generation_config: { thinking_level: "low" },
       }, { timeout_ms: timeoutMs });
       const out = res.output_text?.trim();

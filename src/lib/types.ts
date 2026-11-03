@@ -29,6 +29,8 @@ export type Video = {
   comments: number | null;
   /** Langue déclarée de la vidéo (« fr », « en-US », « hi »…), souvent absente. */
   lang: string | null;
+  /** Mots-clés déclarés par la chaîne (15 au plus), pour vérifier qu'une vidéo parle du sujet cherché. */
+  tags?: string[];
   /** Relevé (ms) : sert à dater la fraîcheur des chiffres. */
   fetchedAt: number;
 };

@@ -96,7 +96,7 @@ export async function uploadIds(uploads: string, n: number): Promise<string[]> {
 
 type VideoItem = {
   id: string;
-  snippet: { channelId: string; channelTitle: string; title: string; description: string; publishedAt: string; thumbnails: Thumbs; liveBroadcastContent?: string; defaultAudioLanguage?: string; defaultLanguage?: string };
+  snippet: { channelId: string; channelTitle: string; title: string; description: string; publishedAt: string; thumbnails: Thumbs; liveBroadcastContent?: string; defaultAudioLanguage?: string; defaultLanguage?: string; tags?: string[] };
   contentDetails: { duration: string };
   statistics: { viewCount?: string; likeCount?: string; commentCount?: string };
 };
@@ -117,6 +117,7 @@ export async function videosByIds(ids: string[]): Promise<Video[]> {
         likes: v.statistics.likeCount === undefined ? null : Number(v.statistics.likeCount),
         comments: v.statistics.commentCount === undefined ? null : Number(v.statistics.commentCount),
         lang: (v.snippet.defaultAudioLanguage ?? v.snippet.defaultLanguage ?? null)?.toLowerCase() ?? null,
+        tags: v.snippet.tags?.slice(0, 15),
         fetchedAt: now,
       });
     }

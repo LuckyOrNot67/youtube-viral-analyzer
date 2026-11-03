@@ -44,18 +44,22 @@ const Notes = z.object({
 });
 
 export type ExtraitsResult = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null };
+/** Étapes réelles du calcul, affichées pendant l'attente. */
+export type Etape = "commentaires" | "video" | "notes";
 
-export async function findExtraits(v: Video): Promise<ExtraitsResult> {
+export async function findExtraits(v: Video, onEtape: (e: Etape) => void = () => {}): Promise<ExtraitsResult> {
   if (v.duration > DUREE_MAX_VIDEO) throw new Error(`Vidéo trop longue (plus de ${DUREE_MAX_VIDEO / 3600} h).`);
-  const { value } = await cached(`extraits:${v.id}`, LIMITES.cache.extraitsHeures, () => compute(v));
+  const { value } = await cached(`extraits:${v.id}`, LIMITES.cache.extraitsHeures, () => compute(v, onEtape));
   return value;
 }
 
-async function compute(v: Video): Promise<ExtraitsResult> {
+async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsResult> {
+  onEtape("commentaires");
   const moments = citedMoments(await commentsOf(v.id).catch(() => []), v.duration);
   if (!hasGemini()) return { extraits: [], moments, source: "commentaires", avertissement: "Clé Gemini manquante : seuls les moments cités en commentaires sont disponibles." };
 
   let candidates: Candidate[];
+  onEtape("video");
   try {
     const raw = jsonIn(await geminiWatchYouTube(v.id, watchPrompt(v, moments), v.id));
     candidates = z.array(Candidate).parse(raw);
@@ -74,6 +78,7 @@ async function compute(v: Video): Promise<ExtraitsResult> {
 
   let notes: z.infer<typeof Notes>["notes"] = [];
   if (hasClaude()) {
+    onEtape("notes");
     const res = await claude(v.id).messages.parse({
       model: CLAUDE_MODEL,
       max_tokens: 6000,

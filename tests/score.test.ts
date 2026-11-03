@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { comparables, rank, scoreVideo, velocity, VUES_MIN } from "../src/lib/score.ts";
 import { fmtTime, isoDuration, parseInput, timestampsIn } from "../src/lib/parse.ts";
+import { couvre, motsDe, parleDe } from "../src/lib/sujet.ts";
 import type { Video } from "../src/lib/types.ts";
 
 const NOW = Date.parse("2026-11-01T12:00:00Z");
@@ -103,4 +104,15 @@ test("durées et minutages", () => {
   assert.deepEqual(timestampsIn("score 3:75"), []);
   assert.equal(fmtTime(3730), "1:02:10");
   assert.equal(fmtTime(75), "1:15");
+});
+
+test("sujet : mots utiles, vidéos qui en parlent, recherche qui en couvre une autre", () => {
+  assert.deepEqual(motsDe("#OFM life"), ["ofm", "life"]);
+  assert.deepEqual(motsDe("la vie de l'été"), ["vie", "ete"]);
+  assert.ok(parleDe({ title: "Ma journée", description: "#ofmlife #agence", tags: [] }, ["ofm"]));
+  assert.ok(parleDe({ title: "Agence OFM : ma vie", description: "", tags: ["life"] }, ["ofm", "life"]));
+  assert.ok(!parleDe({ title: "Orelsan - clip officiel", description: "", tags: ["rap"] }, ["ofm"]));
+  assert.ok(!parleDe({ title: "Le soufm", description: "", tags: [] }, ["ofm"]));
+  assert.ok(couvre(["ofm"], ["ofm", "life"]));
+  assert.ok(!couvre(["ofm", "life"], ["ofm"]));
 });

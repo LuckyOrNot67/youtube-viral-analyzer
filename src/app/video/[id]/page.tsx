@@ -10,6 +10,12 @@ import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/type
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = CommentsAnalysis["moments"][number];
 type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null };
+type Etape = "commentaires" | "video" | "notes";
+const ETAPES: { id: Etape; label: string }[] = [
+  { id: "commentaires", label: "Lecture des commentaires" },
+  { id: "video", label: "L'IA regarde la vidéo" },
+  { id: "notes", label: "Notation des passages" },
+];
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -112,12 +118,33 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   const [err, setErr] = useState<string | null>(null);
   const [made, setMade] = useState<Set<number>>(new Set());
   const [t0, setT0] = useState(0);
+  const [etape, setEtape] = useState<Etape | null>(null);
 
-  const run = () => {
-    setState("load"); setErr(null); setT0(Date.now());
-    api<ExtraitsRes>(`/api/video/${video.id}/extraits`, { method: "POST" })
-      .then((r) => { setRes(r); setState("done"); })
-      .catch((e) => { setErr(e.message); setState("idle"); });
+  const run = async () => {
+    setState("load"); setErr(null); setT0(Date.now()); setEtape(null);
+    try {
+      const r = await fetch(`/api/video/${video.id}/extraits`, { method: "POST" });
+      if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error ?? "Erreur.");
+      // Le serveur envoie une ligne par étape réelle, puis le résultat.
+      const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value;
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const l of lines.filter(Boolean)) {
+          const m = JSON.parse(l) as { etape?: Etape; resultat?: ExtraitsRes; error?: string };
+          if (m.etape) { setEtape(m.etape); setT0(Date.now()); }
+          if (m.error) throw new Error(m.error);
+          if (m.resultat) { setRes(m.resultat); setState("done"); return; }
+        }
+      }
+      throw new Error("La réponse s'est arrêtée en route. Réessaie.");
+    } catch (e) {
+      setErr((e as Error).message); setState("idle");
+    }
   };
 
   // Les passages de l'IA, sinon les moments cités dans les commentaires (45 s autour).
@@ -130,7 +157,17 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   return (
     <section className="col" style={{ gap: 10 }}>
       {state === "idle" && <button className="btn accent" onClick={run}><Sparkles size={18} /> Trouver les Shorts</button>}
-      {state === "load" && <Waiting since={t0} label="L'IA regarde la vidéo…" />}
+      {state === "load" && (
+        <ol className="col small" style={{ gap: 6, listStyle: "none", padding: 0, margin: 0 }} aria-live="polite">
+          {ETAPES.map((e, i) => {
+            const cur = ETAPES.findIndex((x) => x.id === etape);
+            return i < cur
+              ? <li key={e.id} className="row">✓ {e.label}</li>
+              : i === cur ? <li key={e.id}><Waiting since={t0} label={`${e.label}…`} /></li>
+              : <li key={e.id} className="row" style={{ opacity: 0.5 }}>{e.label}</li>;
+          })}
+        </ol>
+      )}
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res && !passages.length && <p className="sub">Aucun passage trouvé.</p>}
       {passages.length > 0 && (

@@ -1,8 +1,9 @@
 import "server-only";
-import { cached, purge } from "../db";
+import { cached, cacheGet, cacheSet, db, purge } from "../db";
 import { isFrench } from "../lang";
 import { parseInput, type Parsed } from "../parse";
 import { rank, scoreVideo, SHORT_MAX } from "../score";
+import { couvre, motsDe, parleDe } from "../sujet";
 import type { Channel, ScoredVideo, SearchResult, Video } from "../types";
 import { channelBy, channelsByIds, searchVideoIds, snapshotsOf, uploadIds, videosByIds, YouTubeError, type SearchFilters } from "./client";
 import LIMITES from "@/config/limites.json";
@@ -54,34 +55,78 @@ export async function analyzeChannel(p: Extract<Parsed, { kind: "handle" | "chan
 const MAX_PAGES = 3;
 /** On arrête de chercher plus loin dès qu'on a assez de vidéos qui passent les filtres. */
 const ASSEZ = 20;
+/** Avec autant de vidéos déjà en mémoire (« ofm » pour « ofm life »), on ne relance pas YouTube. */
+const SEUIL_REPRISE = 10;
+/** Durée de vie de la liste d'une recherche (l'appel le plus rare) : une recherche « 24 h » vieillit vite.
+ *  Les vues, elles, sont relues toutes les quelques heures pour 1 unité par lot de 50. */
+const LISTE_HEURES = { "24h": 2, "7j": 12, "30j": 24, "90j": 48, tout: H.sujetHeures };
+
+type Trouve = { videos: Video[]; chans: Channel[]; vues: number; reprises?: string[] };
+
+/** Recherches encore en mémoire, avec les mêmes filtres, dont tous les mots font partie de la nouvelle. */
+function recherchesQuiCouvrent(mots: string[], fk: string, saufCle: string): { q: string; t: Trouve }[] {
+  const rows = db().prepare("SELECT key, value FROM cache WHERE key LIKE ? AND expires > ?").all(`sujet:%:${fk}`, Date.now()) as { key: string; value: string }[];
+  return rows
+    .filter((r) => r.key !== saufCle)
+    .map((r) => ({ q: r.key.slice("sujet:".length, -(fk.length + 1)), t: JSON.parse(r.value) as Trouve }))
+    .filter((r) => couvre(motsDe(r.q), mots));
+}
 
 export async function analyzeTopic(q: string, f: SearchFilters): Promise<SearchResult> {
   purge();
   const langue = f.langue ?? "fr";
-  const fk = `${f.periode ?? "7j"}:${f.duree ?? "toutes"}:${langue}`;
+  const periodeK = f.periode ?? "7j";
+  const fk = `${periodeK}:${f.duree ?? "toutes"}:${langue}`;
+  const mots = motsDe(q);
   const passes = (v: Video, chans: Map<string, Channel>) =>
     (f.duree === "shorts" ? v.duration <= SHORT_MAX : f.duree === "longues" ? v.duration > SHORT_MAX : true)
-    && (langue !== "fr" || isFrench({ lang: v.lang, title: v.title, description: v.description, channelCountry: chans.get(v.channelId)?.country ?? null }));
+    && (langue !== "fr" || isFrench({ lang: v.lang, title: v.title, description: v.description, channelCountry: chans.get(v.channelId)?.country ?? null }))
+    && parleDe(v, mots);
 
-  // Recherche, statistiques et chaînes, page par page, jusqu'à avoir assez de vidéos dans la bonne langue.
-  const { value: found, hit } = await cached(`sujet:${q.toLowerCase()}:${fk}`, H.videoHeures, async () => {
-    const videos: Video[] = [], chans = new Map<string, Channel>();
-    let next: string | undefined, pages = 0, vues = 0;
-    do {
+  const key = `sujet:${q.toLowerCase()}:${fk}`;
+  let found = cacheGet<Trouve>(key);
+  let cherche = false;
+  if (!found) {
+    // On part de ce qu'on sait déjà : « ofm » en mémoire fournit les vidéos qui parlent aussi de « life ».
+    const videos: Video[] = [], chans = new Map<string, Channel>(), reprises: string[] = [];
+    for (const a of recherchesQuiCouvrent(mots, fk, key)) {
+      const utiles = a.t.videos.filter((v) => parleDe(v, mots) && !videos.some((x) => x.id === v.id));
+      if (!utiles.length) continue;
+      reprises.push(a.q);
+      videos.push(...utiles);
+      for (const c of a.t.chans) if (utiles.some((v) => v.channelId === c.id)) chans.set(c.id, c);
+    }
+    // Sinon, ou pas assez : recherche YouTube page par page, jusqu'à avoir assez de vidéos dans la bonne langue.
+    // Avec une base déjà en mémoire, une seule page suffit à compléter (1 recherche au lieu de 3).
+    const maxPages = videos.length ? 1 : MAX_PAGES;
+    let next: string | undefined, pages = 0, vues = videos.length;
+    while (videos.length < (pages === 0 ? SEUIL_REPRISE : ASSEZ) && pages < maxPages && (pages === 0 || next)) {
       const r = await searchVideoIds(q, f, next);
+      cherche = true;
       pages++; next = r.next;
       const vs = await videosByIds(r.ids.filter((id) => !videos.some((v) => v.id === id)));
       vues += vs.length;
       const missing = [...new Set(vs.map((v) => v.channelId))].filter((id) => !chans.has(id));
       for (const [id, c] of await channelsByIds(missing)) chans.set(id, c);
       videos.push(...vs.filter((v) => passes(v, chans)));
-    } while (next && pages < MAX_PAGES && videos.length < ASSEZ);
-    return { videos, chans: [...chans.values()].filter((c) => videos.some((v) => v.channelId === c.id)), vues };
-  });
-  const kept = found.videos;
+    }
+    found = { videos, chans: [...chans.values()].filter((c) => videos.some((v) => v.channelId === c.id)), vues, reprises };
+    cacheSet(key, found, LISTE_HEURES[periodeK]);
+  }
+
+  // Liste gardée plus longtemps que les chiffres : on relit les vues si elles datent (1 unité par 50 vidéos).
+  const vieilles = found.videos.filter((v) => Date.now() - v.fetchedAt > H.videoHeures * 3600_000);
+  if (vieilles.length) {
+    const frais = new Map((await videosByIds(vieilles.map((v) => v.id))).map((v) => [v.id, v]));
+    found = { ...found, videos: found.videos.map((v) => frais.get(v.id) ?? v) };
+    cacheSet(key, found, LISTE_HEURES[periodeK]);
+  }
+
+  // Les recherches gardées d'avant ce filtre peuvent encore contenir des vidéos hors sujet.
+  const kept = found.videos.filter((v) => parleDe(v, mots));
   if (!kept.length) throw new YouTubeError(langue === "fr"
-    ? "Aucune vidéo en français trouvée pour ce sujet sur cette période. Essaie une période plus longue ou d'autres mots."
-    : "Aucune vidéo trouvée pour ce sujet avec ces filtres.", 404);
+    ? `Aucune vidéo en français ne parle de « ${mots.join(" ")} » sur cette période. Essaie une période plus longue ou d'autres mots.`
+    : `Aucune vidéo ne parle de « ${mots.join(" ")} » avec ces filtres.`, 404);
 
   // Chaque vidéo est comparée aux 50 dernières vidéos de SA chaîne (mise en cache 24 h, partagée entre recherches).
   const pools = new Map<string, Video[]>();
@@ -95,8 +140,9 @@ export async function analyzeTopic(q: string, f: SearchFilters): Promise<SearchR
   const scored = scoreAll(kept, pools, new Map(found.chans.map((c) => [c.id, c.subs])));
   const periode = { "24h": "des dernières 24 h", "7j": "des 7 derniers jours", "30j": "des 30 derniers jours", "90j": "des 90 derniers jours", tout: "" }[f.periode ?? "7j"];
   return {
-    type: "sujet", query: q, channel: null, videos: scored, cache: hit, fetchedAt: Math.min(...kept.map((v) => v.fetchedAt)),
-    portee: `${kept.length} vidéos ${langue === "fr" ? "en français " : ""}${periode} parmi les ${found.vues} que YouTube renvoie pour « ${q} ». Ce n'est pas l'inventaire complet du sujet.`,
+    type: "sujet", query: q, channel: null, videos: scored, cache: !cherche, fetchedAt: Math.min(...kept.map((v) => v.fetchedAt)),
+    portee: `${kept.length} vidéos ${langue === "fr" ? "en français " : ""}${periode} qui parlent de « ${mots.join(" ")} », parmi les ${found.vues} que YouTube renvoie`
+      + `${found.reprises?.length ? ` (dont celles de ${found.reprises.map((r) => `« ${r} »`).join(", ")}, déjà cherché)` : ""}. Ce n'est pas l'inventaire complet du sujet.`,
   };
 }
 
