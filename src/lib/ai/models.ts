@@ -10,6 +10,9 @@ const GEMINI_FALLBACKS = ["gemini-3.5-flash", "gemini-3.8-flash"];
 /** Images regardées par seconde de vidéo. Par défaut Gemini en prend environ 1 ; à 0,5, une vidéo de 30 min passe de
  *  ~103 k à ~66 k jetons, mêmes passages trouvés aux mêmes minutages (mesuré sur 4MphCDK8fWg). Le son reste entier. */
 const GEMINI_FPS = Number(process.env.GEMINI_FPS ?? 0.5);
+/** Au-delà de 45 min, deux fois moins d'images : une vidéo de 3 h coûterait sinon ~400 k jetons. */
+const LONGUE = 45 * 60;
+export const fpsPour = (duree: number) => (duree > LONGUE ? GEMINI_FPS / 2 : GEMINI_FPS);
 
 export const hasClaude = () => Boolean(process.env.ANTHROPIC_API_KEY);
 export const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
@@ -29,7 +32,7 @@ export function claude(projet: string) {
 
 /** Gemini regarde une vidéo YouTube publique à partir de son lien (aucun téléchargement de notre côté).
  *  Un modèle saturé ou trop lent passe la main au suivant. */
-export async function geminiWatchYouTube(videoId: string, prompt: string, projet: string, timeoutMs = 240_000): Promise<string> {
+export async function geminiWatchYouTube(videoId: string, duree: number, prompt: string, projet: string, timeoutMs = 240_000): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const uri = `https://www.youtube.com/watch?v=${videoId}`;
   let last: unknown;
@@ -38,7 +41,7 @@ export async function geminiWatchYouTube(videoId: string, prompt: string, projet
     try {
       const res = await ai.interactions.create({
         model,
-        input: [{ type: "video", uri, processing: { type: "static", fps: GEMINI_FPS } }, { type: "text", text: prompt }],
+        input: [{ type: "video", uri, processing: { type: "static", fps: fpsPour(duree) } }, { type: "text", text: prompt }],
         generation_config: { thinking_level: "low" },
       }, { timeout_ms: timeoutMs });
       const out = res.output_text?.trim();

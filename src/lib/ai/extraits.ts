@@ -61,7 +61,7 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
   let candidates: Candidate[];
   onEtape("video");
   try {
-    const raw = jsonIn(await geminiWatchYouTube(v.id, watchPrompt(v, moments), v.id));
+    const raw = jsonIn(await geminiWatchYouTube(v.id, v.duration, watchPrompt(v, moments), v.id));
     candidates = z.array(Candidate).parse(raw);
   } catch (e) {
     console.warn("[extraits] Gemini :", (e as Error).message);

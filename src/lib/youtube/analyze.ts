@@ -51,8 +51,8 @@ export async function analyzeChannel(p: Extract<Parsed, { kind: "handle" | "chan
   };
 }
 
-/** Pages de recherche au plus (1 page = 50 vidéos = 1 des 100 recherches du jour). */
-const MAX_PAGES = 3;
+/** Pages de recherche au plus (1 page = 50 vidéos = 1 des 100 recherches du jour, partagées par toute l'app). */
+const MAX_PAGES = 2;
 /** On arrête de chercher plus loin dès qu'on a assez de vidéos qui passent les filtres. */
 const ASSEZ = 20;
 /** Avec autant de vidéos déjà en mémoire (« ofm » pour « ofm life »), on ne relance pas YouTube. */
