@@ -7,6 +7,7 @@ import type { Extrait, Video } from "../types";
 import { commentsOf } from "./comments";
 import { citationsIn, citedMoments, type Moment } from "./moments";
 import { claude, CLAUDE_MODEL, geminiWatchYouTube, hasClaude, hasGemini, jsonIn } from "./models";
+import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
 
 // Meilleurs passages d'une vidéo longue : 1) moments cités en commentaires, 2) Gemini regarde la vidéo par son
@@ -33,8 +34,10 @@ Un bon passage :
 - contient une révélation, une réaction forte, une histoire courte, une info surprenante, une réponse claire, un débat, un moment drôle, une démonstration, une transformation, un conseil concret ou une phrase marquante.
 ${moments.length ? `\nDes spectateurs citent ces moments dans les commentaires (à vérifier dans la vidéo) : ${moments.map((m) => fmtTime(m.t)).join(", ")}.\n` : ""}
 Règles : les minutages doivent correspondre à ce qu'on voit et entend réellement dans la vidéo. N'invente rien.
-Réponds UNIQUEMENT avec un tableau JSON, sans texte autour :
-[{"start": secondes depuis le début (nombre), "end": secondes (nombre), "type": "révélation|réaction|histoire|info|réponse|débat|drôle|démo|transformation|conseil|phrase", "premiere_phrase": "la première phrase prononcée dans le passage, mot pour mot", "resume": "ce qui se passe, en une phrase"}]`;
+Dis aussi si la vidéo supporte d'être recadrée en vertical.
+Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
+{${QUESTION_FORMAT},
+"passages": [{"start": secondes depuis le début (nombre), "end": secondes (nombre), "type": "révélation|réaction|histoire|info|réponse|débat|drôle|démo|transformation|conseil|phrase", "premiere_phrase": "la première phrase prononcée dans le passage, mot pour mot", "resume": "ce qui se passe, en une phrase"}]}`;
 
 const Notes = z.object({
   notes: z.array(z.object({
@@ -66,7 +69,7 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
   let candidates: Candidate[];
   onEtape("video");
   try {
-    const raw = jsonIn(await geminiWatchYouTube(v.id, v.duration, watchPrompt(v, moments), v.id));
+    const raw = lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, watchPrompt(v, moments), v.id)), "passages");
     candidates = z.array(Candidate).parse(raw);
   } catch (e) {
     console.warn("[extraits] Gemini :", (e as Error).message);

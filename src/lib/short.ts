@@ -1,7 +1,7 @@
 import "server-only";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
@@ -11,7 +11,7 @@ import { db } from "./db";
 import LIMITES from "@/config/limites.json";
 
 // Export d'un Short vertical à partir d'un passage d'une vidéo YouTube : yt-dlp télécharge seulement les passages
-// (avec 1 s de marge), puis FFmpeg les cadre en 9:16, égalise le son et sort un MP4 1080×1920.
+// (avec 1 s de marge), puis FFmpeg les cadre en 9:16 (ou garde l'horizontal), égalise le son et sort un MP4 1080×1920 (ou 1920×1080).
 // Décision du fondateur (01/11/2026), contraire aux règles développeur YouTube (III.E.1) : voir docs/RECAP.md.
 //
 // Pour que YouTube ne bloque pas le serveur, on télécharge le moins possible : un passage téléchargé sert à tout le
@@ -25,13 +25,11 @@ const KEEP_MS = LIMITES.analyse.conservationJours * 86400_000;
 
 export const hasDownloader = () => existsSync(YTDLP);
 
-export type Cadrage = "centre" | "entier";
+export type Cadrage = "centre" | "entier" | "horizontal";
 type Etat = "attente" | "telechargement" | "montage" | "pret" | "erreur";
 export type ShortJob = {
   id: string; videoId: string; start: number; end: number; cadrage: Cadrage;
   etat: Etat; progression: number; erreur: string | null; createdAt: number; uid: string;
-  /** Ce qu'on télécharge : le passage lui-même, ou toute l'histoire pour une partie d'histoire. */
-  source?: Passage;
 };
 export type Passage = { start: number; end: number };
 
@@ -44,6 +42,16 @@ export const fileOf = (id: string) => path.join(DIR, `${id}.mp4`);
 const marge = (p: Passage) => ({ from: Math.max(0, p.start - 1), to: p.end + 1 });
 const cle = (p: Passage) => { const { from, to } = marge(p); return `${from}-${to}`; };
 const sourceOf = (videoId: string, p: Passage) => path.join(SOURCES, videoId, `${cle(p)}.mp4`);
+/** Le passage téléchargé, s'il existe. Près de la fin de la vidéo, yt-dlp raccourcit la fin du nom du fichier
+ *  (109-669 au lieu de 109-671) : on accepte un fichier qui commence au même endroit et finit plus tôt. */
+function trouver(videoId: string, p: Passage): string | null {
+  const f = sourceOf(videoId, p);
+  if (existsSync(f)) return f;
+  const { from, to } = marge(p);
+  const dir = path.join(SOURCES, videoId);
+  const nom = existsSync(dir) ? readdirSync(dir).find((n) => { const m = /^(\d+)-(\d+)\.mp4$/.exec(n); return m && +m[1] === from && +m[2] < to && +m[2] >= p.end - 5; }) : null;
+  return nom ? path.join(dir, nom) : null;
+}
 
 type Row = { id: string; user: string; video: string; start: number; end: number; cadrage: Cadrage; titre: string; video_titre: string; etat: Etat; erreur: string | null; at: number };
 
@@ -73,12 +81,12 @@ export function exportesPour(uid: string, videoId: string): Passage[] {
 }
 
 /** Un même passage déjà demandé par la même personne n'est pas refait. `autres` : les passages à télécharger dans la foulée. */
-export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; source?: Passage; partie?: number }): { job: ShortJob; nouveau: boolean } {
+export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; partie?: number }): { job: ShortJob; nouveau: boolean } {
   const row = db().prepare("SELECT id FROM shorts WHERE user = ? AND video = ? AND start = ? AND end = ? AND cadrage = ? AND at > ? AND etat != 'erreur'")
     .get(o.uid, o.videoId, o.start, o.end, o.cadrage, Date.now() - KEEP_MS) as { id: string } | undefined;
   const same = row && getJob(row.id);
   if (same && same.etat !== "erreur" && (same.etat !== "pret" || existsSync(fileOf(same.id)))) return { job: same, nouveau: false };
-  const job: ShortJob = { id: randomUUID(), videoId: o.videoId, start: o.start, end: o.end, cadrage: o.cadrage, uid: o.uid, etat: "attente", progression: 0, erreur: null, createdAt: Date.now(), source: o.source };
+  const job: ShortJob = { id: randomUUID(), videoId: o.videoId, start: o.start, end: o.end, cadrage: o.cadrage, uid: o.uid, etat: "attente", progression: 0, erreur: null, createdAt: Date.now() };
   jobs.set(job.id, job);
   db().prepare("INSERT INTO shorts (id, user, video, start, end, cadrage, titre, video_titre, etat, erreur, at, partie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'attente', NULL, ?, ?)")
     .run(job.id, o.uid, o.videoId, o.start, o.end, o.cadrage, o.titre.slice(0, 200), o.videoTitre.slice(0, 200), job.createdAt, o.partie ?? null);
@@ -89,8 +97,10 @@ export function startShort(o: { videoId: string; start: number; end: number; cad
   return { job, nouveau: true };
 }
 
-/** Filtre vertical : « centre » remplit l'écran (recadré au milieu), « entier » garde toute l'image sur un fond flou. */
+/** « centre » remplit l'écran vertical (recadré au milieu), « horizontal » garde l'image entière en 1920×1080
+ *  (TikTok ajoute des bandes noires), « entier » (ancien) la pose sur un fond flou. */
 export function verticalFilter(c: Cadrage): string {
+  if (c === "horizontal") return "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30[vout]";
   if (c === "centre") return "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[vout]";
   return "[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2,eq=brightness=-0.08[bg];"
     + "[b]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,fps=30[vout]";
@@ -98,16 +108,17 @@ export function verticalFilter(c: Cadrage): string {
 
 /** Le passage brut, téléchargé une seule fois pour tout le monde. */
 async function passageBrut(videoId: string, p: Passage, autres: Passage[]): Promise<string> {
-  const f = sourceOf(videoId, p);
   // Un téléchargement en cours qui rapporte ce passage : on l'attend.
   const dl = enCours.get(videoId);
   if (dl?.cles.has(cle(p))) await dl.fin.catch(() => {});
-  if (existsSync(f)) return f;
+  const deja = trouver(videoId, p);
+  if (deja) return deja;
   await telecharger(videoId, [p]);
-  if (!existsSync(f)) throw new Error("Le téléchargement du passage a échoué. Réessaie dans un instant.");
+  const f = trouver(videoId, p);
+  if (!f) throw new Error("Le téléchargement du passage a échoué. Réessaie dans un instant.");
   // Dans la foulée, les autres passages proposés, en un seul appel (personne n'attend).
   const prevus = enCours.get(videoId)?.cles;
-  const reste = autres.filter((x) => !existsSync(sourceOf(videoId, x)) && !prevus?.has(cle(x)));
+  const reste = autres.filter((x) => !trouver(videoId, x) && !prevus?.has(cle(x)));
   if (reste.length) telecharger(videoId, reste).catch((e) => console.warn("[short] lot :", (e as Error).message));
   return f;
 }
@@ -134,7 +145,7 @@ async function telecharger(videoId: string, passages: Passage[]) {
       ({ code, err } = await essai());
     }
     logCost(videoId, "telechargement", { ms: Date.now() - t0, passages: passages.length, ok: code === 0 });
-    if (code !== 0 && !passages.some((p) => existsSync(sourceOf(videoId, p)))) throw new Error(downloadError(err));
+    if (code !== 0 && !passages.some((p) => trouver(videoId, p))) throw new Error(downloadError(err));
   })();
   const prev = enCours.get(videoId);
   const entree = { cles: new Set([...(prev?.cles ?? []), ...cles]), fin: Promise.all([prev?.fin, fin.catch(() => {})]).then(() => {}) };
@@ -147,7 +158,7 @@ async function run(job: ShortJob, autres: Passage[]) {
   const t0 = Date.now();
   await mkdir(DIR, { recursive: true });
   job.etat = "telechargement";
-  const source = job.source ?? { start: job.start, end: job.end };
+  const source = { start: job.start, end: job.end };
   const input = await passageBrut(job.videoId, source, autres);
   job.progression = 0.4;
 

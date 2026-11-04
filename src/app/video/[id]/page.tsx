@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, Download, Flame, Loader2, MessageCircle, Scissors, Sparkles } from "lucide-react";
 import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import { Cover } from "@/components/Cover";
 import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/types";
 import { decouper } from "@/lib/decoupe";
+import LIMITES from "@/config/limites.json";
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = CommentsAnalysis["moments"][number];
-type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; formule: { nom: string; shortsParVideo: number }; expireLe: number };
+type Format = "vertical" | "horizontal";
+/** L'avis de l'IA sur le format (gardé pour tout le monde) et le choix de la personne, pour les Shorts ou pour les histoires. */
+type FormatInfo = { conseil: { format: Format; raison: string } | null; choix: Format | null };
+type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; format: FormatInfo; formule: { nom: string; shortsParVideo: number }; expireLe: number };
 type Etape = "commentaires" | "video" | "notes";
 const ETAPES: { id: Etape; label: string }[] = [
   { id: "commentaires", label: "Lecture des commentaires" },
@@ -104,8 +108,12 @@ export default function VideoPage() {
         </div>
       </details>
 
-      {!s.isShort && <Extraits video={v} onSeek={seek} />}
-      {!s.isShort && <Histoires video={v} onSeek={seek} />}
+      {!s.isShort && (
+        <>
+          <Extraits video={v} onSeek={seek} />
+          <Histoires video={v} onSeek={seek} />
+        </>
+      )}
       <Comments videoId={v.id} onSeek={seek} />
 
       {d.voisines.length > 0 && (
@@ -136,6 +144,42 @@ function Crit({ label, p }: { label: string; p: number }) {
 }
 
 type Passage = { start: number; end: number; hook: string; titre: string; note: number | null };
+
+type Sorte = "shorts" | "histoires";
+
+/** Avant le résultat : si l'IA juge que le recadrage vertical cacherait l'essentiel, la personne choisit une fois
+ *  pour toutes, à part pour les Shorts et pour les histoires. Sinon (ou une fois choisi), le résultat s'affiche directement. */
+function ChoixFormat({ videoId, sorte, info, children }: { videoId: string; sorte: Sorte; info: FormatInfo | undefined; children: ReactNode }) {
+  const [choix, setChoix] = useState<Format | null>(null);
+  const [envoi, setEnvoi] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (info?.conseil?.format !== "horizontal" || choix || info.choix) return <>{children}</>;
+  const choisir = (format: Format) => {
+    setEnvoi(true); setErr(null);
+    api<{ choix: Format }>(`/api/video/${videoId}/format`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sorte, format }) })
+      .then((r) => setChoix(r.choix)).catch((e) => setErr(e.message)).finally(() => setEnvoi(false));
+  };
+  const img = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+  return (
+    <div className="choix-format">
+      <div className="cf-txt">
+        <span className="stk pink">{sorte === "shorts" ? "Avant tes Shorts" : "Avant tes histoires"}</span>
+        <b className="h h-m">Cette vidéo rend mieux <span className="it acc">en horizontal.</span></b>
+        <p className="sub">{info.conseil.raison} En vertical, on couperait l&apos;essentiel. En horizontal, TikTok ajoute simplement des bandes noires en haut et en bas.</p>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button className="btn lime" disabled={envoi} onClick={() => choisir("horizontal")}>Garder l&apos;horizontal</button>
+          <button className="btn ghost" disabled={envoi} onClick={() => choisir("vertical")}>Vertical quand même</button>
+        </div>
+        <p className="small">{sorte === "shorts" ? "Ce choix vaut pour tous les Shorts de cette vidéo (les histoires ont leur propre choix)." : "Ce choix vaut pour toutes les parties des histoires de cette vidéo (les Shorts ont leur propre choix)."} Il ne pourra plus être changé.</p>
+        {err && <div className="notice bad" role="alert">{err}</div>}
+      </div>
+      <div className="cf-apercu" aria-hidden>
+        <figure><div className="cf-tel h"><img src={img} alt="" referrerPolicy="no-referrer" /></div><figcaption>Horizontal</figcaption></figure>
+        <figure><div className="cf-tel v"><img src={img} alt="" referrerPolicy="no-referrer" /></div><figcaption>Vertical</figcaption></figure>
+      </div>
+    </div>
+  );
+}
 
 function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
   const [state, setState] = useState<"idle" | "load" | "done">("idle");
@@ -178,6 +222,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
         </ol>
       )}
       {err && <div className="notice bad" role="alert">{err}</div>}
+      <ChoixFormat videoId={video.id} sorte="shorts" info={res?.format}>
       {res && !passages.length && <p className="sub">Aucun passage trouvé.</p>}
       {passages.length > 0 && (
         <>
@@ -199,6 +244,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
           </div>
         </>
       )}
+      </ChoixFormat>
     </section>
   );
 }
@@ -207,18 +253,20 @@ type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur";
 type PartieDe = { partie: number; start: number; end: number };
 
 /** Lance le Short dès l'ouverture : plein écran, sans bandes floues ; l'image entière reste au choix. */
-function ExportShort({ videoId, start, end, titre, histoire }: { videoId: string; start: number; end: number; titre: string; histoire?: PartieDe }) {
-  const [cadrage, setCadrage] = useState<"entier" | "centre">("centre");
+function ExportShort({ videoId, start, end, titre, histoire, onFin }: { videoId: string; start: number; end: number; titre: string; histoire?: PartieDe; onFin?: () => void }) {
   const [job, setJob] = useState<{ id: string; j: Job } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const fini = !!err || job?.j.etat === "pret" || job?.j.etat === "erreur";
+  // Prévient la file d'attente des parties : la suivante peut commencer.
+  useEffect(() => { if (fini) onFin?.(); }, [fini]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setErr(null); setJob(null);
-    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, cadrage, titre, histoire }) })
+    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, titre, histoire }) })
       .then(({ id }) => setJob({ id, j: { etat: "attente", progression: 0, erreur: null } }))
       .catch((x) => setErr(x.message));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `histoire` est recréé à chaque rendu, ses valeurs sont start/end
-  }, [videoId, start, end, cadrage, titre]);
+  }, [videoId, start, end, titre]);
 
   useEffect(() => {
     if (!job || job.j.etat === "pret" || job.j.etat === "erreur") return;
@@ -244,16 +292,13 @@ function ExportShort({ videoId, start, end, titre, histoire }: { videoId: string
       <video src={`/api/short/${job.id}?fichier=1`} controls playsInline />
       <div className="col">
         <a className="btn lime" href={`/api/short/${job.id}?fichier=1&telecharger=1`} download><Download size={18} /> Télécharger</a>
-        <button className="btn ghost sm" onClick={() => setCadrage(cadrage === "entier" ? "centre" : "entier")}>
-          {cadrage === "entier" ? "Version plein écran" : "Version image entière"}
-        </button>
       </div>
     </div>
   );
 }
 
 type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[] };
-type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; durees: number[] };
+type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; format: FormatInfo; durees: number[] };
 
 /** Histoires en parties (Partie 1, 2, 3…) : coupées sur un moment de suspense, à la durée choisie. */
 function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
@@ -261,6 +306,8 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [load, setLoad] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [t0, setT0] = useState(0);
+  // Demandée avant de lancer : l'IA trouve les moments de suspense une fois, la durée choisie décide où couper.
+  const [duree, setDuree] = useState(LIMITES.histoires.durees[0]);
   const run = () => {
     setLoad(true); setErr(null); setT0(Date.now());
     flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
@@ -268,21 +315,38 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   };
   return (
     <section className="col" style={{ gap: 12 }}>
-      {!res && !load && <button className="btn ghost" onClick={run}><BookOpen size={18} /> Découper en histoires</button>}
+      {!res && !load && (
+        <div className="story">
+          <b className="story-t">Découper en histoires</b>
+          <p className="small">L&apos;IA trouve les histoires complètes de la vidéo et les coupe en parties qui donnent envie de voir la suite. Combien de temps par partie ?</p>
+          <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
+            {LIMITES.histoires.durees.map((d) => (
+              <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} onClick={() => setDuree(d)}>{d / 60} min</button>
+            ))}
+          </div>
+          <button className="btn lime" onClick={run}><BookOpen size={18} /> Découper en parties de {duree / 60} min</button>
+        </div>
+      )}
       {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2></div>}
       {load && <Waiting since={t0} label="L'IA cherche les histoires… (1 à 3 min)" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
-      {res?.avertissement && <p className="sub">{res.avertissement}</p>}
-      {res?.histoires.map((h) => <UneHistoire key={`${h.start}-${h.end}`} videoId={video.id} h={h} durees={res.durees} onSeek={onSeek} />)}
+      <ChoixFormat videoId={video.id} sorte="histoires" info={res?.format}>
+        {res?.avertissement && <p className="sub">{res.avertissement}</p>}
+        {res?.histoires.map((h) => <UneHistoire key={`${h.start}-${h.end}`} videoId={video.id} h={h} durees={res.durees} depart={duree} onSeek={onSeek} />)}
+      </ChoixFormat>
     </section>
   );
 }
 
-function UneHistoire({ videoId, h, durees, onSeek }: { videoId: string; h: Histoire; durees: number[]; onSeek: (s: number, e?: number) => void }) {
-  const [cible, setCible] = useState(durees[0] ?? 60);
-  const [made, setMade] = useState<Set<number>>(new Set());
+function UneHistoire({ videoId, h, durees, depart, onSeek }: { videoId: string; h: Histoire; durees: number[]; depart: number; onSeek: (s: number, e?: number) => void }) {
+  const [cible, setCible] = useState(durees.includes(depart) ? depart : durees[0] ?? 60);
+  // Les parties demandées, dans l'ordre : une seule se crée à la fois, les autres attendent leur tour.
+  const [file, setFile] = useState<number[]>([]);
+  const [finies, setFinies] = useState<Set<number>>(new Set());
   const [vue, setVue] = useState<number | null>(null);
   const parties = decouper(h.start, h.end, h.suspense, cible);
+  const enCours = file.find((n) => !finies.has(n));
+  const demander = (ns: number[]) => setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]);
   return (
     <div className="story">
       <div className="col" style={{ gap: 6 }}>
@@ -292,23 +356,25 @@ function UneHistoire({ videoId, h, durees, onSeek }: { videoId: string; h: Histo
       </div>
       <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
         {durees.map((d) => (
-          <button key={d} role="radio" aria-checked={d === cible} className={d === cible ? "on" : ""} onClick={() => { setCible(d); setMade(new Set()); setVue(null); }}>{d / 60} min</button>
+          <button key={d} role="radio" aria-checked={d === cible} className={d === cible ? "on" : ""} onClick={() => { setCible(d); setFile([]); setFinies(new Set()); setVue(null); }}>{d / 60} min</button>
         ))}
       </div>
       <div className="covers row-x">
         {parties.map((p) => (
-          <div key={`${cible}-${p.n}`} className={`cover-col${made.has(p.n) ? " wide" : ""}`}>
-            {made.has(p.n)
-              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }} />
+          <div key={`${cible}-${p.n}`} className={`cover-col${finies.has(p.n) || enCours === p.n ? " wide" : ""}`}>
+            {finies.has(p.n) || enCours === p.n
+              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }}
+                  onFin={() => setFinies((f) => new Set(f).add(p.n))} />
               : <>
                   <Cover videoId={videoId} decale={DECALAGES[p.n % DECALAGES.length]} actif={vue === p.n} onClick={() => { setVue(p.n); onSeek(p.start, p.end); }}
-                    haut={<span className="tc">Jour {p.n}</span>} titre={<span className="part-big">Partie {p.n}</span>} bas={<span className="tc">{fmtDur(p.end - p.start)}</span>} />
-                  <button className="btn sm" onClick={() => setMade(new Set(made).add(p.n))}><Scissors size={15} /> Créer</button>
+                    haut={<span className="tc">{file.includes(p.n) ? "En attente" : `Jour ${p.n}`}</span>} titre={<span className="part-big">Partie {p.n}</span>} bas={<span className="tc">{fmtDur(p.end - p.start)}</span>} />
+                  {!file.includes(p.n) && <button className="btn sm" onClick={() => demander([p.n])}><Scissors size={15} /> Créer</button>}
                 </>}
           </div>
         ))}
       </div>
-      {made.size < parties.length && <button className="btn lime" onClick={() => setMade(new Set(parties.map((p) => p.n)))}>Créer les {parties.length} parties</button>}
+      {file.length < parties.length && <button className="btn lime" onClick={() => demander(parties.map((p) => p.n))}>Créer les {parties.length} parties</button>}
+      {enCours !== undefined && <p className="small">Une partie à la fois, environ 1 min chacune : télécharge-la dès qu&apos;elle est prête, la suivante démarre toute seule.</p>}
     </div>
   );
 }

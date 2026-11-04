@@ -8,6 +8,7 @@ import type { HistoiresResult } from "@/lib/ai/histoires";
 import type { Cadrage } from "@/lib/short";
 import { formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
+import { choixDe } from "@/lib/format";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -16,9 +17,10 @@ const Body = z.object({
   videoId: z.string().regex(VIDEO_ID),
   start: z.number().min(0),
   end: z.number().positive(),
-  cadrage: z.enum(["centre", "entier"]),
+  /** Ignoré : le format vient du choix fait pour les Shorts ou les histoires de la vidéo (vertical par défaut). */
+  cadrage: z.enum(["centre", "entier", "horizontal"]).optional(),
   titre: z.string().max(300).optional(),
-  /** Une partie d'histoire : le numéro de la partie et l'histoire entière (téléchargée une fois pour toutes ses parties). */
+  /** Une partie d'histoire : le numéro de la partie et l'histoire entière (pour vérifier que la partie en fait bien partie). */
   histoire: z.object({ partie: z.number().int().min(1), start: z.number().min(0), end: z.number().positive() }).optional(),
 });
 
@@ -26,7 +28,7 @@ export async function POST(req: Request) {
   try {
     const b = Body.safeParse(await req.json().catch(() => null));
     if (!b.success) { console.warn("[short] demande invalide :", b.error.message); throw new UserError("Demande d'export invalide."); }
-    const { videoId, cadrage } = b.data;
+    const { videoId } = b.data;
     const start = Math.round(b.data.start), end = Math.round(b.data.end);
     const len = end - start, h = b.data.histoire;
     const dureeMax = h ? LIMITES.histoires.partieMax : LIMITES.short.dureeMax;
@@ -35,6 +37,7 @@ export async function POST(req: Request) {
     const { video } = await videoDetail(videoId);
     if (end > video.duration + 1) throw new UserError("Ce passage dépasse la fin de la vidéo.");
     const uid = await userId();
+    const cadrage: Cadrage = choixDe(uid, videoId, h ? "histoires" : "shorts") === "horizontal" ? "horizontal" : "centre";
 
     if (h) return NextResponse.json({ id: partieHistoire(uid, video, { start, end, cadrage, titre: b.data.titre ?? "", h }) });
 
@@ -63,6 +66,6 @@ function partieHistoire(uid: string, video: { id: string; title: string }, o: { 
   if (!r || !histoire || !histoiresPayees(uid, video.id, r.creeLe)) throw new UserError("Découpe d'abord cette vidéo en histoires (ou refais-le : c'est gardé 7 jours).");
   if (o.start < histoire.start - 1 || o.end > histoire.end + 1) throw new UserError("Cette partie sort de l'histoire.");
   const titre = `${o.titre || histoire.titre} · Partie ${o.h.partie}`;
-  const { job } = startShort({ videoId: video.id, start: o.start, end: o.end, cadrage: o.cadrage, uid, titre, videoTitre: video.title, autres: [], source: { start: histoire.start, end: histoire.end }, partie: o.h.partie });
+  const { job } = startShort({ videoId: video.id, start: o.start, end: o.end, cadrage: o.cadrage, uid, titre, videoTitre: video.title, autres: [], partie: o.h.partie });
   return job.id;
 }

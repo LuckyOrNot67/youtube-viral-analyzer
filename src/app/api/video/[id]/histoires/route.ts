@@ -4,6 +4,7 @@ import { videoDetail } from "@/lib/youtube/analyze";
 import { coutVideo, histoiresPayees, payerHistoires } from "@/lib/analyses";
 import { assertUsage, countUsage, formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
+import { formatPour } from "@/lib/format";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -37,7 +38,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
             payerHistoires(uid, id);
             countUsage(uid, "histoires", cout);
           }
-          send({ resultat: { ...r, durees: LIMITES.histoires.durees, formule: { nom: formule().nom } } });
+          send({ resultat: { ...r, format: formatPour(uid, id, "histoires"), durees: LIMITES.histoires.durees, formule: { nom: formule().nom } } });
         } catch (e) {
           send({ error: (await fail(e).json()).error });
         } finally {
