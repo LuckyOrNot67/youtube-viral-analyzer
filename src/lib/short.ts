@@ -30,6 +30,8 @@ type Etat = "attente" | "telechargement" | "montage" | "pret" | "erreur";
 export type ShortJob = {
   id: string; videoId: string; start: number; end: number; cadrage: Cadrage;
   etat: Etat; progression: number; erreur: string | null; createdAt: number; uid: string;
+  /** Ce qu'on télécharge : le passage lui-même, ou toute l'histoire pour une partie d'histoire. */
+  source?: Passage;
 };
 export type Passage = { start: number; end: number };
 
@@ -64,21 +66,22 @@ export function shortsDe(uid: string) {
   return rows.map((r) => ({ ...getJob(r.id)!, uid: undefined, titre: r.titre, videoTitre: r.video_titre, expireLe: r.at + KEEP_MS, fichier: existsSync(fileOf(r.id)) }));
 }
 
-/** Passages différents déjà exportés par la personne pour cette vidéo (les deux cadrages d'un passage comptent pour un). */
+/** Passages différents déjà exportés par la personne pour cette vidéo (les deux cadrages d'un passage comptent pour un ;
+ *  les parties d'histoire ne comptent pas). */
 export function exportesPour(uid: string, videoId: string): Passage[] {
-  return db().prepare("SELECT DISTINCT start, end FROM shorts WHERE user = ? AND video = ? AND at > ? AND etat != 'erreur'").all(uid, videoId, Date.now() - KEEP_MS) as Passage[];
+  return db().prepare("SELECT DISTINCT start, end FROM shorts WHERE user = ? AND video = ? AND at > ? AND etat != 'erreur' AND partie IS NULL").all(uid, videoId, Date.now() - KEEP_MS) as Passage[];
 }
 
 /** Un même passage déjà demandé par la même personne n'est pas refait. `autres` : les passages à télécharger dans la foulée. */
-export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[] }): { job: ShortJob; nouveau: boolean } {
+export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; source?: Passage; partie?: number }): { job: ShortJob; nouveau: boolean } {
   const row = db().prepare("SELECT id FROM shorts WHERE user = ? AND video = ? AND start = ? AND end = ? AND cadrage = ? AND at > ? AND etat != 'erreur'")
     .get(o.uid, o.videoId, o.start, o.end, o.cadrage, Date.now() - KEEP_MS) as { id: string } | undefined;
   const same = row && getJob(row.id);
   if (same && same.etat !== "erreur" && (same.etat !== "pret" || existsSync(fileOf(same.id)))) return { job: same, nouveau: false };
-  const job: ShortJob = { id: randomUUID(), videoId: o.videoId, start: o.start, end: o.end, cadrage: o.cadrage, uid: o.uid, etat: "attente", progression: 0, erreur: null, createdAt: Date.now() };
+  const job: ShortJob = { id: randomUUID(), videoId: o.videoId, start: o.start, end: o.end, cadrage: o.cadrage, uid: o.uid, etat: "attente", progression: 0, erreur: null, createdAt: Date.now(), source: o.source };
   jobs.set(job.id, job);
-  db().prepare("INSERT INTO shorts (id, user, video, start, end, cadrage, titre, video_titre, etat, erreur, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'attente', NULL, ?)")
-    .run(job.id, o.uid, o.videoId, o.start, o.end, o.cadrage, o.titre.slice(0, 200), o.videoTitre.slice(0, 200), job.createdAt);
+  db().prepare("INSERT INTO shorts (id, user, video, start, end, cadrage, titre, video_titre, etat, erreur, at, partie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'attente', NULL, ?, ?)")
+    .run(job.id, o.uid, o.videoId, o.start, o.end, o.cadrage, o.titre.slice(0, 200), o.videoTitre.slice(0, 200), job.createdAt, o.partie ?? null);
   run(job, o.autres)
     .catch((e) => { job.etat = "erreur"; job.erreur = (e as Error).message; console.warn("[short]", (e as Error).message); })
     .finally(() => db().prepare("UPDATE shorts SET etat = ?, erreur = ? WHERE id = ?").run(job.etat, job.erreur, job.id));
@@ -96,12 +99,10 @@ export function verticalFilter(c: Cadrage): string {
 /** Le passage brut, téléchargé une seule fois pour tout le monde. */
 async function passageBrut(videoId: string, p: Passage, autres: Passage[]): Promise<string> {
   const f = sourceOf(videoId, p);
-  if (existsSync(f)) return f;
+  // Un téléchargement en cours qui rapporte ce passage : on l'attend.
   const dl = enCours.get(videoId);
-  if (dl?.cles.has(cle(p))) {
-    await dl.fin.catch(() => {});
-    if (existsSync(f)) return f;
-  }
+  if (dl?.cles.has(cle(p))) await dl.fin.catch(() => {});
+  if (existsSync(f)) return f;
   await telecharger(videoId, [p]);
   if (!existsSync(f)) throw new Error("Le téléchargement du passage a échoué. Réessaie dans un instant.");
   // Dans la foulée, les autres passages proposés, en un seul appel (personne n'attend).
@@ -113,18 +114,25 @@ async function passageBrut(videoId: string, p: Passage, autres: Passage[]): Prom
 
 async function telecharger(videoId: string, passages: Passage[]) {
   const dir = path.join(SOURCES, videoId);
-  await mkdir(dir, { recursive: true });
   const cles = new Set(passages.map(cle));
+  // Enregistré tout de suite (sans attendre) : un autre export du même passage attend ce téléchargement au lieu d'en lancer un second.
   const fin = (async () => {
+    await mkdir(dir, { recursive: true });
     const t0 = Date.now();
-    const { code, err } = await ytdlp([
-      "-q", "--no-warnings", "--no-playlist", "--no-part",
+    // YouTube refuse parfois un passage sur le moment (ffmpeg sort en erreur) : une seconde tentative suffit en général.
+    const essai = () => ytdlp([
+      "-q", "--no-warnings", "--no-playlist",
       "-f", "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
       ...passages.flatMap((p) => { const { from, to } = marge(p); return ["--download-sections", `*${from}-${to}`]; }),
       "--merge-output-format", "mp4", "--remux-video", "mp4",
       "--ffmpeg-location", ffmpegPath as unknown as string,
       "-o", path.join(dir, "%(section_start)s-%(section_end)s.%(ext)s"), `https://www.youtube.com/watch?v=${videoId}`,
     ]);
+    let { code, err } = await essai();
+    if (code !== 0 && !/not a bot|sign in to confirm|private video|unavailable|members-only/i.test(err)) {
+      await new Promise((r) => setTimeout(r, 3000));
+      ({ code, err } = await essai());
+    }
     logCost(videoId, "telechargement", { ms: Date.now() - t0, passages: passages.length, ok: code === 0 });
     if (code !== 0 && !passages.some((p) => existsSync(sourceOf(videoId, p)))) throw new Error(downloadError(err));
   })();
@@ -139,14 +147,15 @@ async function run(job: ShortJob, autres: Passage[]) {
   const t0 = Date.now();
   await mkdir(DIR, { recursive: true });
   job.etat = "telechargement";
-  const input = await passageBrut(job.videoId, job, autres);
+  const source = job.source ?? { start: job.start, end: job.end };
+  const input = await passageBrut(job.videoId, source, autres);
   job.progression = 0.4;
 
   job.etat = "montage";
   const { duration, hasAudio } = await probe(input);
   // Le passage téléchargé commence ~1 s avant ; on recale précisément sur le début demandé.
   const len = job.end - job.start;
-  const offset = Math.max(0, Math.min(job.start - marge(job).from, Math.max(0, duration - len)));
+  const offset = Math.max(0, Math.min(job.start - marge(source).from, Math.max(0, duration - len)));
   await ffmpeg([
     "-ss", offset.toFixed(2), "-i", input, "-t", String(len),
     "-filter_complex", verticalFilter(job.cadrage), "-map", "[vout]",

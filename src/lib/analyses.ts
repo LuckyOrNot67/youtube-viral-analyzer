@@ -37,3 +37,8 @@ export function attribuerLot(user: string, videoId: string, creeLe: number): num
 export function passagesDe(user: string, videoId: string, r: ExtraitsResult, lot: number): Extrait[] {
   return propositions(r.extraits, lot, `${videoId}:${r.creeLe}`, formule().shortsParVideo);
 }
+
+/** La personne a-t-elle déjà payé le découpage en histoires de cette vidéo (analyse en cours, moins de 7 jours) ? */
+export const histoiresPayees = (user: string, videoId: string, creeLe: number) => lotDe(user, `h:${videoId}`, creeLe) !== null;
+export const payerHistoires = (user: string, videoId: string) =>
+  db().prepare("INSERT OR REPLACE INTO lots (video, user, lot, at) VALUES (?, ?, 0, ?)").run(`h:${videoId}`, user, Date.now());

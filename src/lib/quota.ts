@@ -42,9 +42,9 @@ export function quotaStatus() {
 // ===== Limites par personne (identifiant anonyme en cookie, en attendant les comptes) =====
 // Deux compteurs suivent la formule : les recherches (par jour) et les vidéos analysées (par mois).
 // Les Shorts sont inclus, plafonnés par vidéo ; les commentaires gardent un simple garde-fou par jour.
-export type Kind = "recherches" | "videos" | "commentaires";
+export type Kind = "recherches" | "videos" | "histoires" | "commentaires";
 type NomFormule = "createur" | "expert" | "pro";
-export type Formule = { id: NomFormule; nom: string; recherchesParJour: number; videosParMois: number; shortsParVideo: number };
+export type Formule = { id: NomFormule; nom: string; recherchesParJour: number; videosParMois: number; shortsParVideo: number; histoiresParMois: number };
 
 /** La formule de la personne. Sans comptes ni paiement, c'est la même pour tout le monde. */
 export function formule(): Formule {
@@ -53,14 +53,14 @@ export function formule(): Formule {
   return { id, ...F[id] };
 }
 
-const LABEL: Record<Kind, string> = { recherches: "recherches", videos: "vidéos analysées", commentaires: "analyses de commentaires" };
-const parMois = (k: Kind) => k === "videos";
+const LABEL: Record<Kind, string> = { recherches: "recherches", videos: "vidéos analysées", histoires: "vidéos découpées en histoires", commentaires: "analyses de commentaires" };
+const parMois = (k: Kind) => k === "videos" || k === "histoires";
 /** Période du compteur : le jour du quota YouTube, ou le mois pour les vidéos. */
 const periode = (k: Kind) => (parMois(k) ? quotaDay().slice(0, 7) : quotaDay());
 
 function limite(user: string, k: Kind): number {
   const f = formule();
-  return k === "recherches" ? f.recherchesParJour : k === "videos" ? f.videosParMois : LIMITES.parUtilisateurParJour.commentaires;
+  return k === "recherches" ? f.recherchesParJour : k === "videos" ? f.videosParMois : k === "histoires" ? f.histoiresParMois : LIMITES.parUtilisateurParJour.commentaires;
 }
 
 export function usageOf(user: string, kind: Kind): number {
@@ -75,10 +75,10 @@ export function assertUsage(user: string, kind: Kind, cost = 1) {
   if (SANS_LIMITES) return;
   const lim = limite(user, kind), used = usageOf(user, kind);
   if (used + cost <= lim) return;
-  if (kind === "videos") {
+  if (parMois(kind)) {
     throw new QuotaError(used < lim
-      ? `Cette vidéo dure plus d'1 h : elle compte pour ${cost}, et il te reste ${lim - used} vidéo à analyser ce mois-ci.`
-      : `Tu as analysé tes ${lim} vidéos de ce mois-ci. Ça repart le mois prochain.`, "utilisateur");
+      ? `Cette vidéo dure plus d'1 h : elle compte pour ${cost}, et il te reste ${lim - used} ${LABEL[kind]} ce mois-ci.`
+      : `Tu as utilisé tes ${lim} ${LABEL[kind]} de ce mois-ci. Ça repart le mois prochain.`, "utilisateur");
   }
   throw new QuotaError(`Tu as utilisé tes ${lim} ${LABEL[kind]} d'aujourd'hui. Ça repart demain.`, "utilisateur");
 }
@@ -88,5 +88,5 @@ export function countUsage(user: string, kind: Kind, cost = 1) {
 }
 
 export function usageSummary(user: string) {
-  return { formule: formule(), compteurs: (["recherches", "videos"] as const).map((k) => ({ kind: k, label: LABEL[k], used: usageOf(user, k), max: limite(user, k), periode: parMois(k) ? "mois" : "jour" })) };
+  return { formule: formule(), compteurs: (["recherches", "videos", "histoires"] as const).map((k) => ({ kind: k, label: LABEL[k], used: usageOf(user, k), max: limite(user, k), periode: parMois(k) ? "mois" : "jour" })) };
 }

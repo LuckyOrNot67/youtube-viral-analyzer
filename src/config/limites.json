@@ -41,7 +41,8 @@
       "prixMoisAnnuel": 8.4,
       "recherchesParJour": 10,
       "videosParMois": 30,
-      "shortsParVideo": 5
+      "shortsParVideo": 5,
+      "histoiresParMois": 5
     },
     "expert": {
       "nom": "Expert",
@@ -49,7 +50,8 @@
       "prixMoisAnnuel": 16.8,
       "recherchesParJour": 25,
       "videosParMois": 70,
-      "shortsParVideo": 10
+      "shortsParVideo": 10,
+      "histoiresParMois": 15
     },
     "pro": {
       "nom": "Pro",
@@ -57,7 +59,8 @@
       "prixMoisAnnuel": 34.3,
       "recherchesParJour": 50,
       "videosParMois": 200,
-      "shortsParVideo": 15
+      "shortsParVideo": 15,
+      "histoiresParMois": 40
     }
   },
   "analyse": {
@@ -66,5 +69,15 @@
     "personnesParLot": 10,
     "passagesMax": 30,
     "conservationJours": 7
+  },
+  "histoires": {
+    "_note": "Histoires en parties (Partie 1, 2, 3…) : l'IA trouve les histoires complètes d'une vidéo et les moments de suspense où couper. Une vidéo découpée en histoires compte 1 sur le compteur histoires (2 au-delà d'1 h), toutes ses parties sont incluses.",
+    "dureeMin": 120,
+    "partieMax": 180,
+    "durees": [
+      60,
+      120,
+      180
+    ]
   }
 }

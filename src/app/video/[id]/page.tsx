@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Download, Flame, Loader2, MessageCircle, Play, Scissors, Sparkles } from "lucide-react";
+import { BookOpen, Download, Flame, Loader2, MessageCircle, Play, Scissors, Sparkles } from "lucide-react";
 import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/types";
+import { decouper } from "@/lib/decoupe";
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = CommentsAnalysis["moments"][number];
@@ -83,6 +84,7 @@ export default function VideoPage() {
       </div>
 
       {!s.isShort && <Extraits video={v} onSeek={seek} />}
+      {!s.isShort && <Histoires video={v} onSeek={seek} />}
       <Comments videoId={v.id} onSeek={seek} />
 
       {d.voisines.length > 0 && (
@@ -198,16 +200,19 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
 type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur"; progression: number; erreur: string | null };
 
 /** Lance le Short dès l'ouverture : image entière sur fond flou, sans réglage. */
-function ExportShort({ videoId, start, end, titre }: { videoId: string; start: number; end: number; titre: string }) {
+type PartieDe = { partie: number; start: number; end: number };
+
+function ExportShort({ videoId, start, end, titre, histoire }: { videoId: string; start: number; end: number; titre: string; histoire?: PartieDe }) {
   const [cadrage, setCadrage] = useState<"entier" | "centre">("entier");
   const [job, setJob] = useState<{ id: string; j: Job } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setErr(null); setJob(null);
-    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, cadrage, titre }) })
+    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, cadrage, titre, histoire }) })
       .then(({ id }) => setJob({ id, j: { etat: "attente", progression: 0, erreur: null } }))
       .catch((x) => setErr(x.message));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `histoire` est recréé à chaque rendu, ses valeurs sont start/end
   }, [videoId, start, end, cadrage, titre]);
 
   useEffect(() => {
@@ -232,6 +237,69 @@ function ExportShort({ videoId, start, end, titre }: { videoId: string; start: n
           {cadrage === "entier" ? "Version plein écran" : "Version image entière"}
         </button>
       </div>
+    </div>
+  );
+}
+
+type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[] };
+type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; durees: number[] };
+
+/** Histoires en parties (Partie 1, 2, 3…) : coupées sur un moment de suspense, à la durée choisie. */
+function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
+  const [res, setRes] = useState<HistoiresRes | null>(null);
+  const [load, setLoad] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [t0, setT0] = useState(0);
+  const run = () => {
+    setLoad(true); setErr(null); setT0(Date.now());
+    api<HistoiresRes>(`/api/video/${video.id}/histoires`, { method: "POST" })
+      .then(setRes).catch((e) => setErr(e.message)).finally(() => setLoad(false));
+  };
+  return (
+    <section className="col" style={{ gap: 10 }}>
+      {!res && !load && <button className="btn ghost" onClick={run}><BookOpen size={18} /> Découper en histoires</button>}
+      {(res || load) && <h2 className="h h-s">Histoires en parties</h2>}
+      {load && <Waiting since={t0} label="L'IA cherche les histoires…" />}
+      {err && <div className="notice bad" role="alert">{err}</div>}
+      {res?.avertissement && <p className="sub">{res.avertissement}</p>}
+      {res?.histoires.map((h) => <UneHistoire key={`${h.start}-${h.end}`} videoId={video.id} h={h} durees={res.durees} onSeek={onSeek} />)}
+    </section>
+  );
+}
+
+function UneHistoire({ videoId, h, durees, onSeek }: { videoId: string; h: Histoire; durees: number[]; onSeek: (s: number, e?: number) => void }) {
+  const [cible, setCible] = useState(durees[0] ?? 60);
+  const [made, setMade] = useState<Set<number>>(new Set());
+  const parties = decouper(h.start, h.end, h.suspense, cible);
+  return (
+    <div className="card" style={{ gap: 10 }}>
+      <div className="col" style={{ gap: 4 }}>
+        <b style={{ fontSize: 17, lineHeight: 1.25 }}>{h.titre}</b>
+        <p className="small">{h.resume} · {Math.round((h.end - h.start) / 60)} min</p>
+      </div>
+      <div className="row" style={{ gap: 6, flexWrap: "wrap" }} role="group" aria-label="Durée de chaque partie">
+        {durees.map((d) => (
+          <button key={d} className={`btn sm${d === cible ? "" : " ghost"}`} aria-pressed={d === cible} onClick={() => { setCible(d); setMade(new Set()); }}>{d / 60} min</button>
+        ))}
+      </div>
+      <p className="small">{parties.length} parties. Poste-en une par jour : Partie 1, puis 2, puis 3…</p>
+      <div className="shorts">
+        {parties.map((p) => (
+          <div key={`${cible}-${p.n}`} className={`sc${made.has(p.n) ? " wide" : ""}`}>
+            <button className="sc-play" onClick={() => onSeek(p.start, p.end)} aria-label={`Voir la partie ${p.n}`}>
+              <span className="row between">
+                <span className="sc-time"><Play size={12} fill="currentColor" /> {fmtDur(p.start)}</span>
+                <span className="sc-note">{fmtDur(p.end - p.start)}</span>
+              </span>
+              <span className="sc-hook">Partie {p.n}</span>
+            </button>
+            {made.has(p.n)
+              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }} />
+              : <button className="btn sm" onClick={() => setMade(new Set(made).add(p.n))}><Scissors size={15} /> Créer</button>}
+          </div>
+        ))}
+      </div>
+      {made.size < parties.length && <button className="btn ghost sm" onClick={() => setMade(new Set(parties.map((p) => p.n)))}>Créer toutes les parties</button>}
     </div>
   );
 }

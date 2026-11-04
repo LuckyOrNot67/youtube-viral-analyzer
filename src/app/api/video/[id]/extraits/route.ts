@@ -25,7 +25,9 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const enc = new TextEncoder();
     const stream = new ReadableStream({
       async start(ctl) {
-        const send = (o: unknown) => ctl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
+        // La personne peut fermer la page en route : on continue (l'analyse est gardée) sans rien envoyer.
+        let ouvert = true;
+        const send = (o: unknown) => { if (ouvert) try { ctl.enqueue(enc.encode(JSON.stringify(o) + "\n")); } catch { ouvert = false; } };
         try {
           const r = await findExtraits(video, (etape) => send({ etape }));
           let extraits = r.extraits;
@@ -42,7 +44,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
         } catch (e) {
           send({ error: (await fail(e).json()).error });
         }
-        ctl.close();
+        if (ouvert) try { ctl.close(); } catch {}
       },
     });
     return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" } });

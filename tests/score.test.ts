@@ -130,3 +130,28 @@ test("lots : chaque groupe a sa sélection, toujours la même, et une formule pl
   assert.equal(lotSuivant(9, 10), 0);
   assert.equal(lotSuivant(10, 10), 1);
 });
+
+test("histoire : parties coupées sur le suspense le plus proche de la durée choisie, jamais plus de 3 min", async () => {
+  const { decouper } = await import("../src/lib/decoupe.ts");
+  const p = decouper(100, 700, [150, 170, 230, 290, 350, 420, 480, 560, 640], 120);
+  assert.equal(p[0].start, 100);
+  assert.equal(p.at(-1)!.end, 700);
+  assert.deepEqual(p.map((x) => x.end).slice(0, -1), [230, 350, 480, 560]);
+  for (let i = 1; i < p.length; i++) assert.equal(p[i].start, p[i - 1].end, "les parties se suivent sans trou");
+  assert.ok(p.every((x) => x.end - x.start <= 180));
+  const sans = decouper(0, 600, [], 180);
+  assert.ok(sans.every((x) => x.end - x.start <= 180) && sans.at(-1)!.end === 600);
+  assert.deepEqual(sans.map((x) => x.n), sans.map((_, i) => i + 1));
+});
+
+test("histoire : en 1 min, pas de partie de 2 min même si le suspense est loin", async () => {
+  const { decouper } = await import("../src/lib/decoupe.ts");
+  const p = decouper(51, 643, [179, 311, 458, 614], 60);
+  assert.ok(p.every((x) => x.end - x.start <= 90), p.map((x) => x.end - x.start).join(","));
+});
+
+test("histoire : jamais de dernière partie minuscule", async () => {
+  const { decouper } = await import("../src/lib/decoupe.ts");
+  const p = decouper(51, 643, [179, 311, 458, 614], 180);
+  assert.ok(p.every((x) => x.end - x.start >= 60 && x.end - x.start <= 180), p.map((x) => x.end - x.start).join(","));
+});
