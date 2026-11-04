@@ -42,7 +42,7 @@
       "recherchesParJour": 10,
       "videosParMois": 30,
       "shortsParVideo": 5,
-      "histoiresParMois": 5
+      "histoiresParMois": 10
     },
     "expert": {
       "nom": "Expert",
@@ -51,7 +51,7 @@
       "recherchesParJour": 25,
       "videosParMois": 70,
       "shortsParVideo": 10,
-      "histoiresParMois": 15
+      "histoiresParMois": 20
     },
     "pro": {
       "nom": "Pro",
@@ -60,11 +60,11 @@
       "recherchesParJour": 50,
       "videosParMois": 200,
       "shortsParVideo": 15,
-      "histoiresParMois": 40
+      "histoiresParMois": 60
     }
   },
   "analyse": {
-    "_note": "Une vidéo de plus d'1 h compte pour 2. L'IA propose un grand choix de passages ; chaque groupe de 10 personnes reçoit sa propre sélection. Tout (analyse, passages téléchargés, Shorts) est gardé 7 jours, puis il faut refaire l'analyse.",
+    "_note": "Chaque heure de vidéo commencée compte pour 1 (1 h 30 compte pour 2, 2 h 30 pour 3). L'IA propose un grand choix de passages ; chaque groupe de 10 personnes reçoit sa propre sélection. Tout (analyse, passages téléchargés, Shorts) est gardé 7 jours, puis il faut refaire l'analyse.",
     "heuresParVideo": 1,
     "personnesParLot": 10,
     "passagesMax": 30,
