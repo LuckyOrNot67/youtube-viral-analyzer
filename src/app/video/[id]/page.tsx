@@ -9,7 +9,7 @@ import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/type
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = CommentsAnalysis["moments"][number];
-type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null };
+type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; formule: { nom: string; shortsParVideo: number }; expireLe: number };
 type Etape = "commentaires" | "video" | "notes";
 const ETAPES: { id: Etape; label: string }[] = [
   { id: "commentaires", label: "Lecture des commentaires" },
@@ -110,7 +110,7 @@ function Crit({ label, p }: { label: string; p: number }) {
   );
 }
 
-type Passage = { start: number; end: number; hook: string; note: number | null };
+type Passage = { start: number; end: number; hook: string; titre: string; note: number | null };
 
 function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
   const [state, setState] = useState<"idle" | "load" | "done">("idle");
@@ -150,8 +150,8 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   // Les passages de l'IA, sinon les moments cités dans les commentaires (45 s autour).
   const passages: Passage[] = res
     ? res.extraits.length
-      ? res.extraits.map((x) => ({ start: x.start, end: x.end, hook: x.hook, note: x.scoreShorts }))
-      : res.moments.map((m) => ({ start: Math.max(0, m.t - 3), end: Math.min(video.duration, m.t + 42), hook: m.exemples[0], note: null }))
+      ? res.extraits.map((x) => ({ start: x.start, end: x.end, hook: x.hook, titre: x.titre, note: x.scoreShorts }))
+      : res.moments.map((m) => ({ start: Math.max(0, m.t - 3), end: Math.min(video.duration, m.t + 42), hook: m.exemples[0], titre: m.exemples[0], note: null }))
     : [];
 
   return (
@@ -170,6 +170,9 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
       )}
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res && !passages.length && <p className="sub">Aucun passage trouvé.</p>}
+      {res?.source === "gemini" && passages.length > 0 && (
+        <p className="small">Formule {res.formule.nom} : {res.formule.shortsParVideo} Shorts par vidéo. Gardés jusqu&apos;au {new Date(res.expireLe).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}, dans <Link href="/shorts">Mes Shorts</Link>.</p>
+      )}
       {passages.length > 0 && (
         <div className="shorts">
           {passages.map((x, i) => (
@@ -182,7 +185,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
                 <span className="sc-hook">{x.hook}</span>
               </button>
               {made.has(i)
-                ? <ExportShort videoId={video.id} start={x.start} end={x.end} />
+                ? <ExportShort videoId={video.id} start={x.start} end={x.end} titre={x.titre} />
                 : <button className="btn sm" onClick={() => setMade(new Set(made).add(i))}><Scissors size={15} /> Créer</button>}
             </div>
           ))}
@@ -195,17 +198,17 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
 type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur"; progression: number; erreur: string | null };
 
 /** Lance le Short dès l'ouverture : image entière sur fond flou, sans réglage. */
-function ExportShort({ videoId, start, end }: { videoId: string; start: number; end: number }) {
+function ExportShort({ videoId, start, end, titre }: { videoId: string; start: number; end: number; titre: string }) {
   const [cadrage, setCadrage] = useState<"entier" | "centre">("entier");
   const [job, setJob] = useState<{ id: string; j: Job } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setErr(null); setJob(null);
-    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, cadrage }) })
+    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, cadrage, titre }) })
       .then(({ id }) => setJob({ id, j: { etat: "attente", progression: 0, erreur: null } }))
       .catch((x) => setErr(x.message));
-  }, [videoId, start, end, cadrage]);
+  }, [videoId, start, end, cadrage, titre]);
 
   useEffect(() => {
     if (!job || job.j.etat === "pret" || job.j.etat === "erreur") return;

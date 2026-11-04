@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { Flame } from "lucide-react";
+import { Clapperboard, Flame } from "lucide-react";
 import "./globals.css";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -22,7 +22,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <header className="topbar">
           <div className="topbar-in">
             <Link href="/" className="logo"><span className="logo-mark"><Flame size={18} strokeWidth={2.6} /></span>Viral Analyzer</Link>
-            <ThemeToggle />
+            <div className="row" style={{ gap: 8 }}>
+              <Link href="/shorts" className="btn ghost sm" style={{ minHeight: 38 }}><Clapperboard size={16} /> Mes Shorts</Link>
+              <ThemeToggle />
+            </div>
           </div>
         </header>
         <main className="wrap">{children}</main>

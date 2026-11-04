@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
 import { findExtraits } from "@/lib/ai/extraits";
 import { videoDetail } from "@/lib/youtube/analyze";
-import { cacheGet } from "@/lib/db";
-import { assertUsage, countUsage } from "@/lib/quota";
+import { analyseDe, attribuerLot, coutVideo, lotDe, passagesDe } from "@/lib/analyses";
+import { assertUsage, countUsage, formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
+import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -13,10 +13,13 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const { id } = await params;
     if (!VIDEO_ID.test(id)) throw new UserError("Identifiant de vidéo invalide.");
     const uid = await userId();
-    const fresh = cacheGet(`extraits:${id}`) === null;
-    if (fresh) assertUsage(uid, "extraits");
     const { video } = await videoDetail(id);
     if (video.s.isShort) throw new UserError("C'est déjà un Short : la recherche d'extraits sert aux vidéos longues.");
+    // Rouvrir une vidéo déjà analysée par la personne (moins de 7 jours) ne coûte rien.
+    const deja = analyseDe(id);
+    const lotConnu = deja ? lotDe(uid, id, deja.creeLe) : null;
+    const cout = coutVideo(video.duration);
+    if (lotConnu === null) assertUsage(uid, "videos", cout);
 
     // Une ligne JSON par étape réelle ({"etape": …}), puis le résultat ({"resultat": …}) ou l'erreur ({"error": …}).
     const enc = new TextEncoder();
@@ -25,8 +28,17 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
         const send = (o: unknown) => ctl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
         try {
           const r = await findExtraits(video, (etape) => send({ etape }));
-          if (fresh && r.source === "gemini") countUsage(uid, "extraits");
-          send({ resultat: r });
+          let extraits = r.extraits;
+          if (r.source === "gemini") {
+            let lot = lotDe(uid, id, r.creeLe);
+            if (lot === null) {
+              lot = attribuerLot(uid, id, r.creeLe);
+              countUsage(uid, "videos", cout);
+            }
+            extraits = passagesDe(uid, id, r, lot);
+          }
+          const { nom, shortsParVideo } = formule();
+          send({ resultat: { ...r, extraits, formule: { nom, shortsParVideo }, expireLe: r.creeLe + LIMITES.analyse.conservationJours * 86400_000 } });
         } catch (e) {
           send({ error: (await fail(e).json()).error });
         }

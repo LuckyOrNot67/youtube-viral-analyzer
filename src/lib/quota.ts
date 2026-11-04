@@ -40,30 +40,53 @@ export function quotaStatus() {
 }
 
 // ===== Limites par personne (identifiant anonyme en cookie, en attendant les comptes) =====
-export type Kind = keyof typeof LIMITES.parUtilisateurParJour;
+// Deux compteurs suivent la formule : les recherches (par jour) et les vidéos analysées (par mois).
+// Les Shorts sont inclus, plafonnés par vidéo ; les commentaires gardent un simple garde-fou par jour.
+export type Kind = "recherches" | "videos" | "commentaires";
+type NomFormule = "createur" | "expert" | "pro";
+export type Formule = { id: NomFormule; nom: string; recherchesParJour: number; videosParMois: number; shortsParVideo: number };
 
-const LABEL: Record<Kind, string> = {
-  chaines: "analyses de chaîne", sujets: "recherches par sujet", commentaires: "analyses de commentaires", extraits: "recherches d'extraits", shorts: "Shorts",
-};
+/** La formule de la personne. Sans comptes ni paiement, c'est la même pour tout le monde. */
+export function formule(): Formule {
+  const F = LIMITES.formules;
+  const id = (["createur", "expert", "pro"] as const).find((x) => x === process.env.FORMULE) ?? (F.parDefaut as NomFormule);
+  return { id, ...F[id] };
+}
+
+const LABEL: Record<Kind, string> = { recherches: "recherches", videos: "vidéos analysées", commentaires: "analyses de commentaires" };
+const parMois = (k: Kind) => k === "videos";
+/** Période du compteur : le jour du quota YouTube, ou le mois pour les vidéos. */
+const periode = (k: Kind) => (parMois(k) ? quotaDay().slice(0, 7) : quotaDay());
+
+function limite(user: string, k: Kind): number {
+  const f = formule();
+  return k === "recherches" ? f.recherchesParJour : k === "videos" ? f.videosParMois : LIMITES.parUtilisateurParJour.commentaires;
+}
 
 export function usageOf(user: string, kind: Kind): number {
-  const row = db().prepare("SELECT n FROM usage WHERE day = ? AND user = ? AND kind = ?").get(quotaDay(), user, kind) as { n: number } | undefined;
+  const row = db().prepare("SELECT n FROM usage WHERE day = ? AND user = ? AND kind = ?").get(periode(kind), user, kind) as { n: number } | undefined;
   return row?.n ?? 0;
 }
 
 // Pour tester en local sans limite par personne (jamais en production). Les quotas YouTube restent appliqués.
 const SANS_LIMITES = process.env.NODE_ENV !== "production" && process.env.SANS_LIMITES === "1";
 
-export function assertUsage(user: string, kind: Kind) {
+export function assertUsage(user: string, kind: Kind, cost = 1) {
   if (SANS_LIMITES) return;
-  const lim = LIMITES.parUtilisateurParJour[kind];
-  if (usageOf(user, kind) >= lim) throw new QuotaError(`Tu as utilisé tes ${lim} ${LABEL[kind]} d'aujourd'hui. Ça repart demain.`, "utilisateur");
+  const lim = limite(user, kind), used = usageOf(user, kind);
+  if (used + cost <= lim) return;
+  if (kind === "videos") {
+    throw new QuotaError(used < lim
+      ? `Cette vidéo dure plus d'1 h : elle compte pour ${cost}, et il te reste ${lim - used} vidéo à analyser ce mois-ci.`
+      : `Tu as analysé tes ${lim} vidéos de ce mois-ci. Ça repart le mois prochain.`, "utilisateur");
+  }
+  throw new QuotaError(`Tu as utilisé tes ${lim} ${LABEL[kind]} d'aujourd'hui. Ça repart demain.`, "utilisateur");
 }
 
-export function countUsage(user: string, kind: Kind) {
-  db().prepare("INSERT INTO usage (day, user, kind, n) VALUES (?, ?, ?, 1) ON CONFLICT (day, user, kind) DO UPDATE SET n = n + 1").run(quotaDay(), user, kind);
+export function countUsage(user: string, kind: Kind, cost = 1) {
+  db().prepare("INSERT INTO usage (day, user, kind, n) VALUES (?, ?, ?, ?) ON CONFLICT (day, user, kind) DO UPDATE SET n = n + excluded.n").run(periode(kind), user, kind, cost);
 }
 
 export function usageSummary(user: string) {
-  return (Object.keys(LIMITES.parUtilisateurParJour) as Kind[]).map((k) => ({ kind: k, label: LABEL[k], used: usageOf(user, k), max: LIMITES.parUtilisateurParJour[k] }));
+  return { formule: formule(), compteurs: (["recherches", "videos"] as const).map((k) => ({ kind: k, label: LABEL[k], used: usageOf(user, k), max: limite(user, k), periode: parMois(k) ? "mois" : "jour" })) };
 }

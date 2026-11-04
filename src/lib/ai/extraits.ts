@@ -13,6 +13,8 @@ import LIMITES from "@/config/limites.json";
 // lien et propose des candidats minutés, 3) Claude note chaque candidat pour un Short, 4) contrôles sans IA.
 
 export const DUREE_MAX_VIDEO = 3 * 3600;
+/** Un grand choix pour que chaque groupe de personnes reçoive des passages différents : environ un toutes les 2 min. */
+export const nbPassages = (duree: number) => Math.max(8, Math.min(LIMITES.analyse.passagesMax, Math.round(duree / 120)));
 
 const Candidate = z.object({
   start: z.number(), end: z.number(),
@@ -21,7 +23,8 @@ const Candidate = z.object({
 type Candidate = z.infer<typeof Candidate>;
 
 const watchPrompt = (v: Video, moments: Moment[]) => `Regarde cette vidéo YouTube en entier (« ${v.title} », ${fmtTime(v.duration)}).
-Trouve les 10 meilleurs passages pour en faire des vidéos courtes verticales (Shorts, Reels, TikTok).
+Trouve ${nbPassages(v.duration)} passages différents, qui ne se chevauchent pas, pour en faire des vidéos courtes verticales (Shorts, Reels, TikTok).
+Il en faut ${nbPassages(v.duration)}, répartis sur toute la vidéo : les plus forts d'abord, puis les bons passages qui restent (ils seront notés ensuite).
 
 Un bon passage :
 - se comprend sans avoir vu le reste de la vidéo ;
@@ -43,20 +46,22 @@ const Notes = z.object({
   })),
 });
 
-export type ExtraitsResult = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null };
+/** `extraits` : tous les passages trouvés (le choix complet, partagé entre les lots). `creeLe` : date de l'analyse. */
+export type ExtraitsResult = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; creeLe: number };
 /** Étapes réelles du calcul, affichées pendant l'attente. */
 export type Etape = "commentaires" | "video" | "notes";
 
 export async function findExtraits(v: Video, onEtape: (e: Etape) => void = () => {}): Promise<ExtraitsResult> {
   if (v.duration > DUREE_MAX_VIDEO) throw new Error(`Vidéo trop longue (plus de ${DUREE_MAX_VIDEO / 3600} h).`);
   const { value } = await cached(`extraits:${v.id}`, LIMITES.cache.extraitsHeures, () => compute(v, onEtape));
-  return value;
+  return { ...value, creeLe: value.creeLe ?? 0 }; // analyses gardées avant l'ajout de la date
 }
 
 async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsResult> {
+  const creeLe = Date.now();
   onEtape("commentaires");
   const moments = citedMoments(await commentsOf(v.id).catch(() => []), v.duration);
-  if (!hasGemini()) return { extraits: [], moments, source: "commentaires", avertissement: "Clé Gemini manquante : seuls les moments cités en commentaires sont disponibles." };
+  if (!hasGemini()) return { creeLe, extraits: [], moments, source: "commentaires", avertissement: "Clé Gemini manquante : seuls les moments cités en commentaires sont disponibles." };
 
   let candidates: Candidate[];
   onEtape("video");
@@ -65,7 +70,7 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
     candidates = z.array(Candidate).parse(raw);
   } catch (e) {
     console.warn("[extraits] Gemini :", (e as Error).message);
-    return { extraits: [], moments, source: "commentaires", avertissement: "La vidéo n'a pas pu être regardée par l'IA (vidéo privée, réservée aux adultes ou trop récente). Voici les moments cités par les spectateurs." };
+    return { creeLe, extraits: [], moments, source: "commentaires", avertissement: "La vidéo n'a pas pu être regardée par l'IA (vidéo privée, réservée aux adultes ou trop récente). Voici les moments cités par les spectateurs." };
   }
 
   // Contrôles sans IA : minutages dans la vidéo, durée raisonnable, pas de doublon.
@@ -74,14 +79,15 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
     .map((c) => ({ ...c, start: Math.max(0, Math.round(c.start)), end: Math.min(v.duration, Math.round(c.end)) }))
     .filter((c) => c.end - c.start >= dureeMin && c.end - c.start <= dureeMax)
     .filter((c, i, all) => !all.slice(0, i).some((o) => Math.min(o.end, c.end) - Math.max(o.start, c.start) > (c.end - c.start) / 2));
-  if (!ok.length) return { extraits: [], moments, source: "commentaires", avertissement: "L'IA n'a pas trouvé de passage exploitable avec des minutages fiables." };
+  console.info(`[extraits] ${v.id} : ${candidates.length} passages proposés par l'IA, ${ok.length} gardés`);
+  if (!ok.length) return { creeLe, extraits: [], moments, source: "commentaires", avertissement: "L'IA n'a pas trouvé de passage exploitable avec des minutages fiables." };
 
   let notes: z.infer<typeof Notes>["notes"] = [];
   if (hasClaude()) {
     onEtape("notes");
     const res = await claude(v.id).messages.parse({
       model: CLAUDE_MODEL,
-      max_tokens: 6000,
+      max_tokens: 10000,
       system: "Tu notes des passages de vidéos YouTube pour en faire des Shorts. Tu écris en français. Tu t'appuies uniquement sur les descriptions fournies, tu ne promets jamais de vues.",
       messages: [{ role: "user", content: `Vidéo : « ${v.title} » (${v.channelTitle}).\n\nPassages candidats :\n${ok.map((c, i) =>
         `${i}. ${fmtTime(c.start)} → ${fmtTime(c.end)} (${c.end - c.start} s), ${c.type}. Début : « ${c.premiere_phrase} ». ${c.resume}${citationsIn(moments, c.start, c.end) ? ` Cité ${citationsIn(moments, c.start, c.end)} fois dans les commentaires.` : ""}`).join("\n")}\n\nNote chaque passage.` }],
@@ -100,7 +106,7 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
       scoreShorts: Math.round(Math.min(10, (n?.scoreShorts ?? 5) + Math.min(1, citations * 0.25)) * 10) / 10,
       citations,
     };
-  }).sort((a, b) => b.scoreShorts - a.scoreShorts).slice(0, 8);
+  }).sort((a, b) => b.scoreShorts - a.scoreShorts);
 
-  return { extraits, moments, source: "gemini", avertissement: hasClaude() ? null : "Clé Claude manquante : les passages ne sont pas notés." };
+  return { creeLe, extraits, moments, source: "gemini", avertissement: hasClaude() ? null : "Clé Claude manquante : les passages ne sont pas notés." };
 }

@@ -31,14 +31,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ redirect: `/video/${d.video.id}` });
     }
     if (p.kind === "topic") {
-      assertUsage(uid, "sujets");
+      assertUsage(uid, "recherches");
       const r = await analyzeTopic(p.q, { periode: periode ?? "7j", duree: duree ?? "toutes", langue: langue ?? "fr" });
-      if (!r.cache) countUsage(uid, "sujets"); // une recherche déjà en cache ne coûte rien : on ne la décompte pas
+      if (!r.cache) countUsage(uid, "recherches"); // une recherche déjà en cache ne coûte rien : on ne la décompte pas
       return NextResponse.json(r);
     }
-    assertUsage(uid, "chaines");
+    assertUsage(uid, "recherches");
     const r = await analyzeChannel(p, n, q.trim());
-    if (!r.cache) countUsage(uid, "chaines");
+    if (!r.cache) countUsage(uid, "recherches");
     return NextResponse.json(r);
   } catch (e) {
     return fail(e);

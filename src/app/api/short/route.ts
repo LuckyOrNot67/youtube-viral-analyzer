@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import * as z from "zod/v4";
-import { hasDownloader, startShort } from "@/lib/short";
+import { exportesPour, hasDownloader, startShort } from "@/lib/short";
 import { videoDetail } from "@/lib/youtube/analyze";
-import { assertUsage, countUsage } from "@/lib/quota";
+import { analyseDe, lotDe, passagesDe } from "@/lib/analyses";
+import { formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
 import LIMITES from "@/config/limites.json";
 
@@ -13,6 +14,7 @@ const Body = z.object({
   start: z.number().min(0),
   end: z.number().positive(),
   cadrage: z.enum(["centre", "entier"]),
+  titre: z.string().max(300).optional(),
 });
 
 export async function POST(req: Request) {
@@ -27,10 +29,19 @@ export async function POST(req: Request) {
     const { video } = await videoDetail(videoId);
     if (end > video.duration + 1) throw new UserError("Ce passage dépasse la fin de la vidéo.");
     const uid = await userId();
-    assertUsage(uid, "shorts");
-    // Le même Short redemandé (double clic, rechargement) n'est ni refait ni décompté.
-    const { job, nouveau } = startShort({ videoId, start, end, cadrage, uid });
-    if (nouveau) countUsage(uid, "shorts");
+
+    // Shorts inclus, plafonnés par vidéo selon la formule (les deux cadrages d'un même passage comptent pour un).
+    const { nom, shortsParVideo } = formule();
+    const faits = exportesPour(uid, videoId);
+    if (!faits.some((p) => p.start === start && p.end === end) && faits.length >= shortsParVideo) {
+      throw new UserError(`Ta formule ${nom} donne ${shortsParVideo} Shorts par vidéo, et tu les as tous créés pour celle-ci.`, 429);
+    }
+    // Les autres passages proposés à la personne seront téléchargés dans la foulée, en un seul appel.
+    const a = analyseDe(videoId);
+    const lot = a ? lotDe(uid, videoId, a.creeLe) : null;
+    const autres = a && lot !== null ? passagesDe(uid, videoId, a, lot).map((x) => ({ start: x.start, end: x.end })) : [];
+
+    const { job } = startShort({ videoId, start, end, cadrage, uid, titre: b.data.titre ?? "", videoTitre: video.title, autres });
     return NextResponse.json({ id: job.id });
   } catch (e) {
     return fail(e);

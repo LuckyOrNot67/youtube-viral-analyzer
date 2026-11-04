@@ -116,3 +116,17 @@ test("sujet : mots utiles, vidéos qui en parlent, recherche qui en couvre une a
   assert.ok(couvre(["ofm"], ["ofm", "life"]));
   assert.ok(!couvre(["ofm", "life"], ["ofm"]));
 });
+
+test("lots : chaque groupe a sa sélection, toujours la même, et une formule plus haute garde les premiers", async () => {
+  const { lotSuivant, ordreDuLot, propositions } = await import("../src/lib/lots.ts");
+  const pool = Array.from({ length: 30 }, (_, i) => ({ id: i, scoreShorts: 9.5 - i * 0.2 }));
+  const ids = (l: { id: number }[]) => l.map((x) => x.id);
+  assert.deepEqual(ids(propositions(pool, 0, "v", 5)), [0, 1, 2, 3, 4]);
+  assert.deepEqual(ids(propositions(pool, 3, "v", 5)), ids(propositions(pool, 3, "v", 5)));
+  const lots = Array.from({ length: 20 }, (_, l) => ids(propositions(pool, l, "v", 5)).join(","));
+  assert.ok(new Set(lots).size >= 15, "les lots sont presque tous différents");
+  assert.deepEqual(ids(ordreDuLot(pool, 4, "v").slice(0, 5)), ids(ordreDuLot(pool, 4, "v").slice(0, 10)).slice(0, 5));
+  assert.equal(lotSuivant(0, 10), 0);
+  assert.equal(lotSuivant(9, 10), 0);
+  assert.equal(lotSuivant(10, 10), 1);
+});
