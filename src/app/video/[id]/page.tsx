@@ -62,23 +62,24 @@ export default function VideoPage() {
         </Link>
       </div>
 
-      <div className="card ink" style={{ gap: 10 }}>
-        <div className="row between" style={{ alignItems: "center" }}>
-          <div className="col" style={{ gap: 4 }}>
-            <p className="punch" style={{ fontSize: 17 }}><Flame size={18} /> {punch(s)}</p>
-            <span className="small" style={{ color: "inherit", opacity: 0.75 }}>{fmtNum(v.views)} vues · {fmtAge(s.ageJours)}</span>
+      <div className="verdict">
+        <div className="row between" style={{ alignItems: "center", gap: 12 }}>
+          <div className="col" style={{ gap: 8 }}>
+            <span className="mono" style={{ color: "var(--ink-muted)" }}>Score d&apos;explosion</span>
+            <p className="punch"><Flame size={15} /> {punch(s)}</p>
+            <span className="small">{fmtNum(v.views)} vues · {fmtAge(s.ageJours)}</span>
           </div>
           <ScoreBadge score={s.score} big />
         </div>
         <details className="more">
-          <summary style={{ color: "inherit", opacity: 0.7 }}>Comment c&apos;est calculé</summary>
+          <summary style={{ color: "var(--ink-muted)" }}>Comment c&apos;est calculé</summary>
           <div className="col" style={{ gap: 8 }}>
             <ul className="list">{s.raisons.map((r) => <li key={r}>{r}</li>)}</ul>
             <Crit label="Surperformance" p={s.parts.surperformance} />
             <Crit label="Vitesse" p={s.parts.vitesse} />
             <Crit label="Engagement" p={s.parts.engagement} />
             <Crit label="Récence" p={s.parts.recence} />
-            <p className="small" style={{ color: "inherit", opacity: 0.75 }}><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
+            <p className="small"><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
           </div>
         </details>
       </div>
@@ -91,7 +92,7 @@ export default function VideoPage() {
         <div className="col" style={{ gap: 6 }}>
           <h2 className="h h-s">Aussi sur la chaîne</h2>
           {d.voisines.map((o) => (
-            <Link key={o.id} href={`/video/${o.id}`} className="row between card" style={{ flexDirection: "row", padding: "10px 14px" }}>
+            <Link key={o.id} href={`/video/${o.id}`} className="row between card" style={{ flexDirection: "row", padding: "12px 16px", borderRadius: 18 }}>
               <span className="vtitle" style={{ fontSize: 14 }}>{o.title}</span>
               <ScoreBadge score={o.s.score} />
             </Link>
@@ -158,7 +159,8 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
 
   return (
     <section className="col" style={{ gap: 10 }}>
-      {state === "idle" && <button className="btn accent" onClick={run}><Sparkles size={18} /> Trouver les Shorts</button>}
+      {state === "idle" && <button className="btn lime arrowed" onClick={run}><span className="row" style={{ gap: 10 }}><Sparkles size={18} /> Trouver les Shorts</span><span className="arrow"><Scissors size={16} /></span></button>}
+      {state === "done" && passages.length > 0 && <div className="sec-head"><h2 className="h h-s">Shorts proposés</h2><span className="mono dim">{passages.length} passages</span></div>}
       {state === "load" && (
         <ol className="col small" style={{ gap: 6, listStyle: "none", padding: 0, margin: 0 }} aria-live="polite">
           {ETAPES.map((e, i) => {
@@ -182,7 +184,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
               <button className="sc-play" onClick={() => onSeek(x.start, x.end)} aria-label={`Voir le passage à ${fmtDur(x.start)}`}>
                 <span className="row between">
                   <span className="sc-time"><Play size={12} fill="currentColor" /> {fmtDur(x.start)}</span>
-                  {x.note !== null && <span className="sc-note">{fmtScore(x.note)}</span>}
+                  {x.note !== null && <span className="sc-note">{fmtScore(x.note)}<small style={{ opacity: .6, fontWeight: 500 }}>/10</small></span>}
                 </span>
                 <span className="sc-hook">{x.hook}</span>
               </button>
@@ -232,7 +234,7 @@ function ExportShort({ videoId, start, end, titre, histoire }: { videoId: string
     <div className="export">
       <video src={`/api/short/${job.id}?fichier=1`} controls playsInline />
       <div className="col">
-        <a className="btn" href={`/api/short/${job.id}?fichier=1&telecharger=1`} download><Download size={18} /> Télécharger</a>
+        <a className="btn lime" href={`/api/short/${job.id}?fichier=1&telecharger=1`} download><Download size={18} /> Télécharger</a>
         <button className="btn ghost sm" onClick={() => setCadrage(cadrage === "entier" ? "centre" : "entier")}>
           {cadrage === "entier" ? "Version plein écran" : "Version image entière"}
         </button>
@@ -270,36 +272,39 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
 function UneHistoire({ videoId, h, durees, onSeek }: { videoId: string; h: Histoire; durees: number[]; onSeek: (s: number, e?: number) => void }) {
   const [cible, setCible] = useState(durees[0] ?? 60);
   const [made, setMade] = useState<Set<number>>(new Set());
+  const [vue, setVue] = useState<number | null>(null);
   const parties = decouper(h.start, h.end, h.suspense, cible);
   return (
-    <div className="card" style={{ gap: 10 }}>
+    <div className="story">
       <div className="col" style={{ gap: 4 }}>
-        <b style={{ fontSize: 17, lineHeight: 1.25 }}>{h.titre}</b>
-        <p className="small">{h.resume} · {Math.round((h.end - h.start) / 60)} min</p>
+        <span className="mono dim">{Math.round((h.end - h.start) / 60)} min · {parties.length} parties</span>
+        <b style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1.2 }}>{h.titre}</b>
+        <p className="small">{h.resume}</p>
       </div>
-      <div className="row" style={{ gap: 6, flexWrap: "wrap" }} role="group" aria-label="Durée de chaque partie">
+      <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
         {durees.map((d) => (
-          <button key={d} className={`btn sm${d === cible ? "" : " ghost"}`} aria-pressed={d === cible} onClick={() => { setCible(d); setMade(new Set()); }}>{d / 60} min</button>
+          <button key={d} role="radio" aria-checked={d === cible} className={d === cible ? "on" : ""} onClick={() => { setCible(d); setMade(new Set()); setVue(null); }}>{d / 60} min</button>
         ))}
       </div>
-      <p className="small">{parties.length} parties. Poste-en une par jour : Partie 1, puis 2, puis 3…</p>
-      <div className="shorts">
+      <div className="track" aria-hidden>
+        {parties.map((p) => <span key={p.n} className={vue === p.n ? "on" : ""} style={{ flexGrow: p.end - p.start }}>{parties.length > 8 ? p.n : `P${p.n}`}</span>)}
+      </div>
+      <div className="parts">
         {parties.map((p) => (
-          <div key={`${cible}-${p.n}`} className={`sc${made.has(p.n) ? " wide" : ""}`}>
-            <button className="sc-play" onClick={() => onSeek(p.start, p.end)} aria-label={`Voir la partie ${p.n}`}>
-              <span className="row between">
-                <span className="sc-time"><Play size={12} fill="currentColor" /> {fmtDur(p.start)}</span>
-                <span className="sc-note">{fmtDur(p.end - p.start)}</span>
-              </span>
-              <span className="sc-hook">Partie {p.n}</span>
-            </button>
-            {made.has(p.n)
-              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }} />
-              : <button className="btn sm" onClick={() => setMade(new Set(made).add(p.n))}><Scissors size={15} /> Créer</button>}
+          <div key={`${cible}-${p.n}`} className="col" style={{ gap: 0 }}>
+            <div className="part">
+              <span className="part-n">Partie {p.n}</span>
+              <button className="sc-play" style={{ flexDirection: "row", alignItems: "center", gap: 10 }} onClick={() => { setVue(p.n); onSeek(p.start, p.end); }} aria-label={`Voir la partie ${p.n}`}>
+                <span className="sc-time"><Play size={11} fill="currentColor" /> {fmtDur(p.start)}</span>
+                <span className="small">{fmtDur(p.end - p.start)}</span>
+              </button>
+              {!made.has(p.n) && <button className="btn sm" onClick={() => setMade(new Set(made).add(p.n))}><Scissors size={15} /> Créer</button>}
+            </div>
+            {made.has(p.n) && <div style={{ paddingBottom: 12 }}><ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }} /></div>}
           </div>
         ))}
       </div>
-      {made.size < parties.length && <button className="btn ghost sm" onClick={() => setMade(new Set(parties.map((p) => p.n)))}>Créer toutes les parties</button>}
+      {made.size < parties.length && <button className="btn lime" onClick={() => setMade(new Set(parties.map((p) => p.n)))}>Créer toutes les parties</button>}
     </div>
   );
 }

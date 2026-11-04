@@ -60,6 +60,7 @@ function Resultats() {
               </div>
             </div>
           ) : <h1 className="h h-l">« {res.query} »</h1>}
+          <span className="mono dim" style={{ marginTop: -8 }}>{list.length} vidéos · classées par score</span>
 
           <div className="segmented" role="radiogroup" aria-label="Format">
             {FORMATS.map(([id, l]) => <button key={id} role="radio" aria-checked={format === id} className={format === id ? "on" : ""} onClick={() => setFormat(id)}>{l}</button>)}
@@ -68,7 +69,7 @@ function Resultats() {
           {!top && <p className="sub">Rien dans ce format.</p>}
           {top && <TopCard v={top} showChannel={showChannel} />}
           {rest.length > 0 && (
-            <div className="col" style={{ gap: 6 }}>
+            <div className="list-v">
               {rest.map((v, i) => <Row key={v.id} v={v} n={i + 2} showChannel={showChannel} />)}
             </div>
           )}
@@ -84,7 +85,7 @@ function TopCard({ v, showChannel }: { v: ScoredVideo; showChannel: boolean }) {
     <Link href={`/video/${v.id}`} className="top">
       <div className="thumb">
         {v.thumb && <img referrerPolicy="no-referrer" src={v.thumb} alt="" />}
-        <span className="badge-1"><Flame size={14} strokeWidth={2.8} /> N°1</span>
+        <span className="badge-1"><Flame size={13} strokeWidth={2.6} /> N°1</span>
         <span className="dur">{v.s.isShort ? "Short" : fmtDur(v.duration)}</span>
       </div>
       <div className="row between" style={{ alignItems: "flex-start", gap: 12 }}>
@@ -94,7 +95,7 @@ function TopCard({ v, showChannel }: { v: ScoredVideo; showChannel: boolean }) {
         </div>
         <ScoreBadge score={v.s.score} big />
       </div>
-      <p className="punch"><Flame size={16} /> {punch(v.s)}</p>
+      <p className="punch"><Flame size={15} /> {punch(v.s)}</p>
     </Link>
   );
 }
