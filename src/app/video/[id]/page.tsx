@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Download, Flame, Loader2, MessageCircle, Play, Scissors, Sparkles } from "lucide-react";
+import { BookOpen, Download, Flame, Loader2, MessageCircle, Scissors, Sparkles } from "lucide-react";
 import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
+import { Cover } from "@/components/Cover";
 import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/types";
 import { decouper } from "@/lib/decoupe";
 
@@ -17,12 +18,36 @@ const ETAPES: { id: Etape; label: string }[] = [
   { id: "video", label: "L'IA regarde la vidéo" },
   { id: "notes", label: "Notation des passages" },
 ];
+// Chaque couverture montre une autre partie de l'image, pour que les tuiles ne se ressemblent pas toutes.
+const DECALAGES = [50, 22, 78, 35, 65, 10, 90];
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   const j = await r.json().catch(() => ({ error: "Réponse illisible." }));
   if (!r.ok) throw new Error(j.error ?? "Erreur.");
   return j as T;
+}
+
+/** Lit une réponse envoyée ligne par ligne (une ligne JSON par étape), jusqu'au résultat. */
+async function flux<T>(url: string, onLigne: (m: { etape?: Etape }) => void = () => {}): Promise<T> {
+  const r = await fetch(url, { method: "POST" });
+  if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error ?? "Le serveur ne répond pas. Réessaie.");
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const l of lines.filter(Boolean)) {
+      const m = JSON.parse(l) as { etape?: Etape; resultat?: T; error?: string };
+      if (m.error) throw new Error(m.error);
+      if (m.resultat) return m.resultat;
+      onLigne(m);
+    }
+  }
+  throw new Error("La réponse s'est arrêtée en route. Réessaie.");
 }
 
 export default function VideoPage() {
@@ -54,49 +79,46 @@ export default function VideoPage() {
         <iframe key={play?.n ?? 0} src={src} title={v.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
       </div>
 
-      <div className="col" style={{ gap: 6 }}>
+      <div className="col" style={{ gap: 8 }}>
         <h1 className="h h-m">{v.title}</h1>
         <Link href={`/resultats?q=${encodeURIComponent(channel.id)}`} className="row small" style={{ gap: 8 }}>
-          {channel.avatar && <img referrerPolicy="no-referrer" src={channel.avatar} alt="" style={{ width: 22, height: 22, borderRadius: "50%" }} />}
-          <span><b style={{ color: "var(--text)" }}>{channel.title}</b> · voir la chaîne</span>
+          {channel.avatar && <img referrerPolicy="no-referrer" src={channel.avatar} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }} />}
+          <span><b style={{ color: "var(--text)" }}>{channel.title}</b> · {fmtNum(v.views)} vues · {fmtAge(s.ageJours)}</span>
         </Link>
       </div>
 
-      <div className="verdict">
-        <div className="row between" style={{ alignItems: "center", gap: 12 }}>
-          <div className="col" style={{ gap: 8 }}>
-            <span className="mono" style={{ color: "var(--ink-muted)" }}>Score d&apos;explosion</span>
-            <p className="punch"><Flame size={15} /> {punch(s)}</p>
-            <span className="small">{fmtNum(v.views)} vues · {fmtAge(s.ageJours)}</span>
-          </div>
-          <ScoreBadge score={s.score} big />
-        </div>
-        <details className="more">
-          <summary style={{ color: "var(--ink-muted)" }}>Comment c&apos;est calculé</summary>
-          <div className="col" style={{ gap: 8 }}>
-            <ul className="list">{s.raisons.map((r) => <li key={r}>{r}</li>)}</ul>
-            <Crit label="Surperformance" p={s.parts.surperformance} />
-            <Crit label="Vitesse" p={s.parts.vitesse} />
-            <Crit label="Engagement" p={s.parts.engagement} />
-            <Crit label="Récence" p={s.parts.recence} />
-            <p className="small"><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
-          </div>
-        </details>
+      {/* Le verdict en deux blocs de couleur : le score, et ce qui le rend explosif. */}
+      <div className="verdict2">
+        <div className="vd-score"><span className="mono">Score</span><span className="vd-n">{fmtScore(s.score)}<small>/10</small></span></div>
+        <div className="vd-why"><Flame size={22} /><span>{punch(s)}</span></div>
       </div>
+      <details className="more">
+        <summary>Comment c&apos;est calculé</summary>
+        <div className="card col" style={{ gap: 10, marginTop: 8 }}>
+          <ul className="list">{s.raisons.map((r) => <li key={r}>{r}</li>)}</ul>
+          <Crit label="Surperformance" p={s.parts.surperformance} />
+          <Crit label="Vitesse" p={s.parts.vitesse} />
+          <Crit label="Engagement" p={s.parts.engagement} />
+          <Crit label="Récence" p={s.parts.recence} />
+          <p className="small"><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
+        </div>
+      </details>
 
       {!s.isShort && <Extraits video={v} onSeek={seek} />}
       {!s.isShort && <Histoires video={v} onSeek={seek} />}
       <Comments videoId={v.id} onSeek={seek} />
 
       {d.voisines.length > 0 && (
-        <div className="col" style={{ gap: 6 }}>
+        <div className="col" style={{ gap: 10 }}>
           <h2 className="h h-s">Aussi sur la chaîne</h2>
-          {d.voisines.map((o) => (
-            <Link key={o.id} href={`/video/${o.id}`} className="row between card" style={{ flexDirection: "row", padding: "12px 16px", borderRadius: 18 }}>
-              <span className="vtitle" style={{ fontSize: 14 }}>{o.title}</span>
-              <ScoreBadge score={o.s.score} />
-            </Link>
-          ))}
+          <div className="scroll-x" style={{ gap: 10 }}>
+            {d.voisines.map((o) => (
+              <Link key={o.id} href={`/video/${o.id}`} className="mini">
+                <div className="thumb">{o.thumb && <img referrerPolicy="no-referrer" src={o.thumb} alt="" loading="lazy" />}<span className="stick"><ScoreBadge score={o.s.score} /></span></div>
+                <span className="vtitle" style={{ fontSize: 13.5 }}>{o.title}</span>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
     </>
@@ -120,31 +142,15 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   const [res, setRes] = useState<ExtraitsRes | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [made, setMade] = useState<Set<number>>(new Set());
+  const [vu, setVu] = useState<number | null>(null);
   const [t0, setT0] = useState(0);
   const [etape, setEtape] = useState<Etape | null>(null);
 
   const run = async () => {
     setState("load"); setErr(null); setT0(Date.now()); setEtape(null);
     try {
-      const r = await fetch(`/api/video/${video.id}/extraits`, { method: "POST" });
-      if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error ?? "Erreur.");
-      // Le serveur envoie une ligne par étape réelle, puis le résultat.
-      const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += value;
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const l of lines.filter(Boolean)) {
-          const m = JSON.parse(l) as { etape?: Etape; resultat?: ExtraitsRes; error?: string };
-          if (m.etape) { setEtape(m.etape); setT0(Date.now()); }
-          if (m.error) throw new Error(m.error);
-          if (m.resultat) { setRes(m.resultat); setState("done"); return; }
-        }
-      }
-      throw new Error("La réponse s'est arrêtée en route. Réessaie.");
+      const r = await flux<ExtraitsRes>(`/api/video/${video.id}/extraits`, (m) => { if (m.etape) { setEtape(m.etape); setT0(Date.now()); } });
+      setRes(r); setState("done");
     } catch (e) {
       setErr((e as Error).message); setState("idle");
     }
@@ -158,9 +164,8 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
     : [];
 
   return (
-    <section className="col" style={{ gap: 10 }}>
-      {state === "idle" && <button className="btn lime arrowed" onClick={run}><span className="row" style={{ gap: 10 }}><Sparkles size={18} /> Trouver les Shorts</span><span className="arrow"><Scissors size={16} /></span></button>}
-      {state === "done" && passages.length > 0 && <div className="sec-head"><h2 className="h h-s">Shorts proposés</h2><span className="mono dim">{passages.length} passages</span></div>}
+    <section className="col" style={{ gap: 12 }}>
+      {state === "idle" && <button className="btn lime arrowed big" onClick={run}><span className="row" style={{ gap: 10 }}><Sparkles size={20} /> Trouver les Shorts</span><span className="arrow"><Scissors size={17} /></span></button>}
       {state === "load" && (
         <ol className="col small" style={{ gap: 6, listStyle: "none", padding: 0, margin: 0 }} aria-live="polite">
           {ETAPES.map((e, i) => {
@@ -174,38 +179,36 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
       )}
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res && !passages.length && <p className="sub">Aucun passage trouvé.</p>}
-      {res?.source === "gemini" && passages.length > 0 && (
-        <p className="small">Formule {res.formule.nom} : {res.formule.shortsParVideo} Shorts par vidéo. Gardés jusqu&apos;au {new Date(res.expireLe).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}, dans <Link href="/shorts">Mes Shorts</Link>.</p>
-      )}
       {passages.length > 0 && (
-        <div className="shorts">
-          {passages.map((x, i) => (
-            <div key={`${x.start}-${x.end}`} className={`sc${made.has(i) ? " wide" : ""}`}>
-              <button className="sc-play" onClick={() => onSeek(x.start, x.end)} aria-label={`Voir le passage à ${fmtDur(x.start)}`}>
-                <span className="row between">
-                  <span className="sc-time"><Play size={12} fill="currentColor" /> {fmtDur(x.start)}</span>
-                  {x.note !== null && <span className="sc-note">{fmtScore(x.note)}<small style={{ opacity: .6, fontWeight: 500 }}>/10</small></span>}
-                </span>
-                <span className="sc-hook">{x.hook}</span>
-              </button>
-              {made.has(i)
-                ? <ExportShort videoId={video.id} start={x.start} end={x.end} titre={x.titre} />
-                : <button className="btn sm" onClick={() => setMade(new Set(made).add(i))}><Scissors size={15} /> Créer</button>}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="sec-head"><h2 className="h h-m">Tes <span className="it acc">Shorts</span></h2><span className="mono dim">{passages.length} passages</span></div>
+          {res?.source === "gemini" && <p className="small">Formule {res.formule.nom} : {res.formule.shortsParVideo} Shorts par vidéo, gardés jusqu&apos;au {new Date(res.expireLe).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} dans <Link href="/shorts" style={{ textDecoration: "underline" }}>Mes Shorts</Link>.</p>}
+          <div className="covers">
+            {passages.map((x, i) => (
+              <div key={`${x.start}-${x.end}`} className={`cover-col${made.has(i) ? " wide" : ""}`}>
+                {made.has(i)
+                  ? <ExportShort videoId={video.id} start={x.start} end={x.end} titre={x.titre} />
+                  : <>
+                      <Cover videoId={video.id} decale={DECALAGES[i % DECALAGES.length]} actif={vu === i} onClick={() => { setVu(i); onSeek(x.start, x.end); }}
+                        haut={<><span className="tc">{fmtDur(x.start)}</span>{x.note !== null && <span className="stk lime">{fmtScore(x.note)}<small>/10</small></span>}</>}
+                        titre={x.hook} bas={<span className="tc">{fmtDur(x.end - x.start)}</span>} />
+                      <button className="btn sm" onClick={() => setMade(new Set(made).add(i))}><Scissors size={15} /> Créer</button>
+                    </>}
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </section>
   );
 }
 
 type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur"; progression: number; erreur: string | null };
-
-/** Lance le Short dès l'ouverture : image entière sur fond flou, sans réglage. */
 type PartieDe = { partie: number; start: number; end: number };
 
+/** Lance le Short dès l'ouverture : plein écran, sans bandes floues ; l'image entière reste au choix. */
 function ExportShort({ videoId, start, end, titre, histoire }: { videoId: string; start: number; end: number; titre: string; histoire?: PartieDe }) {
-  const [cadrage, setCadrage] = useState<"entier" | "centre">("entier");
+  const [cadrage, setCadrage] = useState<"entier" | "centre">("centre");
   const [job, setJob] = useState<{ id: string; j: Job } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -228,7 +231,13 @@ function ExportShort({ videoId, start, end, titre, histoire }: { videoId: string
   const fail = err ?? job?.j.erreur;
   if (fail) return <div className="notice bad" role="alert">{fail}</div>;
   if (job?.j.etat !== "pret") {
-    return <div className="bar" aria-label="Création du Short"><span style={{ width: `${Math.max(5, Math.round((job?.j.progression ?? 0) * 100))}%`, transition: "width .4s" }} /></div>;
+    return (
+      <div className="making">
+        <Loader2 size={20} className="spin" />
+        <span>Création du Short…</span>
+        <div className="bar" style={{ width: "70%" }}><span style={{ width: `${Math.max(5, Math.round((job?.j.progression ?? 0) * 100))}%`, transition: "width .4s" }} /></div>
+      </div>
+    );
   }
   return (
     <div className="export">
@@ -254,14 +263,14 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [t0, setT0] = useState(0);
   const run = () => {
     setLoad(true); setErr(null); setT0(Date.now());
-    api<HistoiresRes>(`/api/video/${video.id}/histoires`, { method: "POST" })
+    flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
       .then(setRes).catch((e) => setErr(e.message)).finally(() => setLoad(false));
   };
   return (
-    <section className="col" style={{ gap: 10 }}>
+    <section className="col" style={{ gap: 12 }}>
       {!res && !load && <button className="btn ghost" onClick={run}><BookOpen size={18} /> Découper en histoires</button>}
-      {(res || load) && <h2 className="h h-s">Histoires en parties</h2>}
-      {load && <Waiting since={t0} label="L'IA cherche les histoires…" />}
+      {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2></div>}
+      {load && <Waiting since={t0} label="L'IA cherche les histoires… (1 à 3 min)" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res?.avertissement && <p className="sub">{res.avertissement}</p>}
       {res?.histoires.map((h) => <UneHistoire key={`${h.start}-${h.end}`} videoId={video.id} h={h} durees={res.durees} onSeek={onSeek} />)}
@@ -276,9 +285,9 @@ function UneHistoire({ videoId, h, durees, onSeek }: { videoId: string; h: Histo
   const parties = decouper(h.start, h.end, h.suspense, cible);
   return (
     <div className="story">
-      <div className="col" style={{ gap: 4 }}>
-        <span className="mono dim">{Math.round((h.end - h.start) / 60)} min · {parties.length} parties</span>
-        <b style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1.2 }}>{h.titre}</b>
+      <div className="col" style={{ gap: 6 }}>
+        <span className="row" style={{ gap: 6, flexWrap: "wrap" }}><span className="stk pink">{parties.length} parties</span><span className="stk">{Math.round((h.end - h.start) / 60)} min</span></span>
+        <b className="story-t">{h.titre}</b>
         <p className="small">{h.resume}</p>
       </div>
       <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
@@ -286,25 +295,20 @@ function UneHistoire({ videoId, h, durees, onSeek }: { videoId: string; h: Histo
           <button key={d} role="radio" aria-checked={d === cible} className={d === cible ? "on" : ""} onClick={() => { setCible(d); setMade(new Set()); setVue(null); }}>{d / 60} min</button>
         ))}
       </div>
-      <div className="track" aria-hidden>
-        {parties.map((p) => <span key={p.n} className={vue === p.n ? "on" : ""} style={{ flexGrow: p.end - p.start }}>{parties.length > 8 ? p.n : `P${p.n}`}</span>)}
-      </div>
-      <div className="parts">
+      <div className="covers row-x">
         {parties.map((p) => (
-          <div key={`${cible}-${p.n}`} className="col" style={{ gap: 0 }}>
-            <div className="part">
-              <span className="part-n">Partie {p.n}</span>
-              <button className="sc-play" style={{ flexDirection: "row", alignItems: "center", gap: 10 }} onClick={() => { setVue(p.n); onSeek(p.start, p.end); }} aria-label={`Voir la partie ${p.n}`}>
-                <span className="sc-time"><Play size={11} fill="currentColor" /> {fmtDur(p.start)}</span>
-                <span className="small">{fmtDur(p.end - p.start)}</span>
-              </button>
-              {!made.has(p.n) && <button className="btn sm" onClick={() => setMade(new Set(made).add(p.n))}><Scissors size={15} /> Créer</button>}
-            </div>
-            {made.has(p.n) && <div style={{ paddingBottom: 12 }}><ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }} /></div>}
+          <div key={`${cible}-${p.n}`} className={`cover-col${made.has(p.n) ? " wide" : ""}`}>
+            {made.has(p.n)
+              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }} />
+              : <>
+                  <Cover videoId={videoId} decale={DECALAGES[p.n % DECALAGES.length]} actif={vue === p.n} onClick={() => { setVue(p.n); onSeek(p.start, p.end); }}
+                    haut={<span className="tc">Jour {p.n}</span>} titre={<span className="part-big">Partie {p.n}</span>} bas={<span className="tc">{fmtDur(p.end - p.start)}</span>} />
+                  <button className="btn sm" onClick={() => setMade(new Set(made).add(p.n))}><Scissors size={15} /> Créer</button>
+                </>}
           </div>
         ))}
       </div>
-      {made.size < parties.length && <button className="btn lime" onClick={() => setMade(new Set(parties.map((p) => p.n)))}>Créer toutes les parties</button>}
+      {made.size < parties.length && <button className="btn lime" onClick={() => setMade(new Set(parties.map((p) => p.n)))}>Créer les {parties.length} parties</button>}
     </div>
   );
 }
@@ -322,7 +326,7 @@ function Comments({ videoId, onSeek }: { videoId: string; onSeek: (s: number) =>
   return (
     <section className="col" style={{ gap: 10 }}>
       {!res && !load && <button className="btn ghost" onClick={run}><MessageCircle size={18} /> Ce que disent les spectateurs</button>}
-      {(res || load) && <h2 className="h h-s">Ce que disent les spectateurs</h2>}
+      {(res || load) && <h2 className="h h-m">Ce que disent les <span className="it acc">spectateurs</span></h2>}
       {load && <Waiting since={t0} label="Lecture…" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res && (
@@ -332,7 +336,7 @@ function Comments({ videoId, onSeek }: { videoId: string; onSeek: (s: number) =>
               <b>Moments cités</b>
               {res.moments.slice(0, 5).map((m) => (
                 <button key={m.t} className="row" style={{ background: "none", border: 0, padding: 0, textAlign: "left", alignItems: "flex-start" }} onClick={() => onSeek(Math.max(0, m.t - 3))}>
-                  <span className="time" style={{ color: "var(--good)", minWidth: 52 }}>{fmtDur(m.t)}</span>
+                  <span className="time" style={{ minWidth: 52 }}>{fmtDur(m.t)}</span>
                   <span className="small" style={{ color: "var(--text)" }}>« {m.exemples[0]} »</span>
                 </button>
               ))}

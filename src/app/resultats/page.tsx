@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Flame } from "lucide-react";
 import { SearchBox } from "@/components/SearchBox";
-import { fmtAge, fmtDur, fmtNum, punch, ScoreBadge } from "@/components/bits";
+import { fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import type { ScoredVideo, SearchResult } from "@/lib/types";
 
 // Un seul choix à l'écran : le format. Le reste (français, 7 jours, 200 vidéos, tri par score) est réglé par défaut.
@@ -69,7 +69,7 @@ function Resultats() {
           {!top && <p className="sub">Rien dans ce format.</p>}
           {top && <TopCard v={top} showChannel={showChannel} />}
           {rest.length > 0 && (
-            <div className="list-v">
+            <div className="grid-v">
               {rest.map((v, i) => <Row key={v.id} v={v} n={i + 2} showChannel={showChannel} />)}
             </div>
           )}
@@ -79,40 +79,35 @@ function Resultats() {
   );
 }
 
-/** La vidéo n°1 : grande, avec la raison de la choisir. */
+/** La vidéo n°1 : l'image en grand, le score et la raison en stickers. */
 function TopCard({ v, showChannel }: { v: ScoredVideo; showChannel: boolean }) {
   return (
-    <Link href={`/video/${v.id}`} className="top">
-      <div className="thumb">
-        {v.thumb && <img referrerPolicy="no-referrer" src={v.thumb} alt="" />}
-        <span className="badge-1"><Flame size={13} strokeWidth={2.6} /> N°1</span>
-        <span className="dur">{v.s.isShort ? "Short" : fmtDur(v.duration)}</span>
+    <Link href={`/video/${v.id}`} className="top-hero">
+      {v.thumb && <img referrerPolicy="no-referrer" src={`https://i.ytimg.com/vi/${v.id}/maxresdefault.jpg`} onError={(e) => { if (v.thumb) e.currentTarget.src = v.thumb; }} alt="" />}
+      <div className="stks">
+        <span className="stk lime"><Flame size={13} strokeWidth={2.6} /> N°1</span>
+        <span className="big-stk">{fmtScore(v.s.score)}<small>/10</small></span>
       </div>
-      <div className="row between" style={{ alignItems: "flex-start", gap: 12 }}>
-        <div className="col" style={{ gap: 4 }}>
-          <p className="vtitle" style={{ fontSize: 17 }}>{v.title}</p>
-          <p className="small">{showChannel ? `${v.channelTitle} · ` : ""}{fmtNum(v.views)} vues · {fmtAge(v.s.ageJours)}</p>
-        </div>
-        <ScoreBadge score={v.s.score} big />
+      <div className="in">
+        <span className="why-stk"><Flame size={15} /> {punch(v.s)}</span>
+        <span className="t1">{v.title}</span>
+        <span className="meta">{showChannel ? `${v.channelTitle} · ` : ""}{fmtNum(v.views)} vues · {fmtAge(v.s.ageJours)} · {v.s.isShort ? "Short" : fmtDur(v.duration)}</span>
       </div>
-      <p className="punch"><Flame size={15} /> {punch(v.s)}</p>
     </Link>
   );
 }
 
 function Row({ v, n, showChannel }: { v: ScoredVideo; n: number; showChannel: boolean }) {
   return (
-    <Link href={`/video/${v.id}`} className="vrow">
-      <span className="n">{n}</span>
+    <Link href={`/video/${v.id}`} className="gcard">
       <div className="thumb">
         {v.thumb && <img referrerPolicy="no-referrer" src={v.thumb} alt="" loading="lazy" />}
+        <span className="rk">#{n}</span>
+        <span className="stick"><ScoreBadge score={v.s.score} /></span>
         <span className="dur">{v.s.isShort ? "Short" : fmtDur(v.duration)}</span>
       </div>
-      <div className="col" style={{ gap: 3 }}>
-        <p className="vtitle">{v.title}</p>
-        <p className="small">{showChannel ? `${v.channelTitle} · ` : ""}{fmtNum(v.views)} vues · {fmtAge(v.s.ageJours)}</p>
-      </div>
-      <ScoreBadge score={v.s.score} />
+      <p className="vtitle">{v.title}</p>
+      <p className="small">{showChannel ? `${v.channelTitle} · ` : ""}{fmtNum(v.views)} vues · {fmtAge(v.s.ageJours)}</p>
     </Link>
   );
 }
