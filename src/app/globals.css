@@ -290,6 +290,8 @@ details.more summary { padding: 4px 2px; }
 .mini { flex: 0 0 200px; display: flex; flex-direction: column; gap: 6px; }
 .mini .thumb { border-radius: 14px; }
 .stick { position: absolute; right: 6px; top: 6px; }
+/* Sur une miniature, une note basse ou moyenne reste lisible quelle que soit l'image derrière. */
+.stick .score.s-low, .stick .score.s-mid { background: rgba(0, 0, 0, .68); color: #fff; border: 0; backdrop-filter: blur(6px); }
 
 /* Résultats en grille d'images, score en sticker sur l'image */
 .grid-v { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; }
