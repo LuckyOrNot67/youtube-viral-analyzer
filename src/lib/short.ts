@@ -182,8 +182,8 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
   const centreX = conseilDe(job.videoId)?.centreX;
   let filtre = verticalFilter(job.cadrage === "auto" ? "bandes" : job.cadrage, centreX);
   if (job.cadrage === "auto" && montage) {
-    // Montage auto : Gemini regarde le passage et dit qui suivre, le détecteur trouve les visages, FFmpeg les changements
-    // de plan. Si Gemini ne répond pas, le cadre suit quand même les visages.
+    // Montage auto : le détecteur trouve les personnes (corps, tête, qui parle, qui bouge), FFmpeg les changements de
+    // plan, Gemini départage. Si Gemini ne répond pas, le montage se fait quand même.
     const phrases = (await montage().catch(() => [] as Phrase[]))
       .filter((p) => p.end > job.start && p.start < job.end).map((p) => ({ ...p, start: p.start - job.start, end: p.end - job.start }));
     const [plans, coupes, visages] = await Promise.all([

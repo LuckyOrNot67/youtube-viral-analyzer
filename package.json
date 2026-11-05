@@ -7,7 +7,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "setup": "python3 -m venv .cache/ytdlp && .cache/ytdlp/bin/pip install -q -U \"yt-dlp[default]\" opencv-python-headless && mkdir -p .cache/modeles && curl -sL -o .cache/modeles/yunet.onnx https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+    "setup": "python3 -m venv .cache/ytdlp && .cache/ytdlp/bin/pip install -q -U \"yt-dlp[default]\" opencv-python-headless && mkdir -p .cache/modeles && curl -sL -o .cache/modeles/yunet.onnx https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx && curl -sL -o .cache/modeles/yolox.onnx https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/object_detection_yolox/object_detection_yolox_2022nov.onnx",
     "test": "node --experimental-strip-types --no-warnings --test tests/*.test.ts"
   },
   "dependencies": {
