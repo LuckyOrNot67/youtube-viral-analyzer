@@ -8,6 +8,7 @@ import ffmpegPath from "ffmpeg-static";
 import { ffmpeg, probe } from "./ai/ffmpeg";
 import { logCost } from "./ai/events";
 import { db } from "./db";
+import { conseilDe } from "./format";
 import LIMITES from "@/config/limites.json";
 
 // Export d'un Short vertical à partir d'un passage d'une vidéo YouTube : yt-dlp télécharge seulement les passages
@@ -100,10 +101,12 @@ export function startShort(o: { videoId: string; start: number; end: number; cad
 /** « centre » remplit l'écran vertical (recadré au milieu) ; « bandes » garde le milieu de l'image en 3:4, bien plus large,
  *  avec des bandes noires en haut et en bas (1080×1920) ; « horizontal » garde l'image entière en 1920×1080
  *  (TikTok ajoute des bandes noires), « entier » (ancien) la pose sur un fond flou. */
-export function verticalFilter(c: Cadrage): string {
-  if (c === "bandes") return "[0:v]crop=w=min(iw\\,ih*3/4):h=min(ih\\,iw*4/3),scale=1080:1440,pad=1080:1920:0:240:black,setsar=1,fps=30[vout]";
+export function verticalFilter(c: Cadrage, centreX = 0.5): string {
+  // Le cadre suit les personnes : `centreX` (0 à gauche, 1 à droite) place la découpe dans la largeur de l'image.
+  const x = Math.min(1, Math.max(0, centreX)).toFixed(2);
+  if (c === "bandes") return `[0:v]crop=w=min(iw\\,ih*3/4):h=min(ih\\,iw*4/3):x=(iw-ow)*${x},scale=1080:1440,pad=1080:1920:0:240:black,setsar=1,fps=30[vout]`;
   if (c === "horizontal") return "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30[vout]";
-  if (c === "centre") return "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[vout]";
+  if (c === "centre") return `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-ow)*${x}:0,setsar=1,fps=30[vout]`;
   return "[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2,eq=brightness=-0.08[bg];"
     + "[b]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,fps=30[vout]";
 }
@@ -171,7 +174,7 @@ async function run(job: ShortJob, autres: Passage[]) {
   const offset = Math.max(0, Math.min(job.start - marge(source).from, Math.max(0, duration - len)));
   await ffmpeg([
     "-ss", offset.toFixed(2), "-i", input, "-t", String(len),
-    "-filter_complex", verticalFilter(job.cadrage), "-map", "[vout]",
+    "-filter_complex", verticalFilter(job.cadrage, conseilDe(job.videoId)?.centreX), "-map", "[vout]",
     ...(hasAudio ? ["-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"] : []),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
     fileOf(job.id),

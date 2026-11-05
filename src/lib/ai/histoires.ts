@@ -2,17 +2,15 @@ import "server-only";
 import * as z from "zod/v4";
 import { cacheGet, cacheSet } from "../db";
 import { decouper, type Partie } from "../decoupe";
-import { fmtTime } from "../parse";
-import { debutDePhrase, enLignes, finDePhrase, sousTitres, type Phrase } from "../sous-titres";
+import { debutDePhrase, finDePhrase, sousTitres, type Phrase } from "../sous-titres";
 import type { Video } from "../types";
-import { GeminiSurcharge, geminiWatchYouTube, hasGemini, jsonIn } from "./models";
-import { DUREE_MAX_VIDEO } from "./extraits";
-import { lireAvecFormat, QUESTION_FORMAT } from "../format";
+import { GeminiSurcharge, hasGemini } from "./models";
+import { DUREE_MAX_VIDEO, dureesPour, regarder } from "./visionnage";
 import LIMITES from "@/config/limites.json";
 
 // Histoires en parties : toute la vidéo, du premier moment intéressant jusqu'à la fin, découpée en parties qui se
-// suivent (Partie 1, 2, 3…) à poster l'une après l'autre. Gemini ne coupe rien : il regarde toute la vidéo une seule
-// fois, avec ses sous-titres, et note où couper pour chaque durée possible (1, 2 et 3 min) d'un coup. La durée varie
+// suivent (Partie 1, 2, 3…) à poster l'une après l'autre. Gemini ne coupe rien : pendant le même visionnage que pour
+// les Shorts (visionnage.ts), avec les sous-titres, il note où couper pour chaque durée possible (1, 2 et 3 min). La durée varie
 // (59 s, puis 48 s, puis 1 min 05…) pour couper là où le spectateur reste frustré de ne pas avoir la suite ; chaque
 // partie reprend 2 ou 3 s de la précédente. C'est notre serveur qui coupe ensuite. Changer de durée est donc immédiat
 // et gratuit. Gardé 7 jours pour tout le monde.
@@ -35,22 +33,7 @@ export type HistoiresResult = { histoires: Histoire[]; avertissement: string | n
 
 const H = LIMITES.histoires;
 export const cleHistoires = (videoId: string) => `series:${videoId}`;
-/** Les durées de partie possibles pour une vidéo : il faut de quoi faire au moins `partiesMin` parties. */
-export const dureesPour = (dureeVideo: number) => H.durees.filter((d) => dureeVideo >= d * H.partiesMin);
-
-const prompt = (v: Video, durees: number[], phrases: Phrase[]) => `Regarde cette vidéo YouTube en entier (« ${v.title} », ${fmtTime(v.duration)}).
-On va la poster sur TikTok en parties qui se suivent (« Partie 1 », « Partie 2 »…), du premier moment intéressant jusqu'à la fin. Tu ne coupes rien toi-même : tu notes seulement où couper. Le créateur choisira la durée des parties, alors donne une découpe complète pour chacune de ces durées : ${durees.map((d) => `${d} s`).join(", ")}.
-
-1. "debut" : la seconde où la vidéo devient intéressante, après le générique, l'intro, les annonces ou la pub (0 si elle commence tout de suite). "fin" : la seconde où le contenu se termine, avant la conclusion, les remerciements et l'écran de fin. Les découpes vont toutes de "debut" à "fin".
-2. "decoupes" : pour chaque durée, la liste complète des parties qui se suivent. ${durees.map((d) => `Pour ${d} s, chaque partie dure entre ${Math.round(d * 0.75)} et ${Math.min(H.partieMax, Math.round(d * 1.25))} secondes`).join(" ; ")}. La durée change d'une partie à l'autre pour couper au bon moment : chaque partie (sauf la dernière) se termine sur un moment qui frustre le spectateur et lui donne envie de voir la suite, juste avant une révélation, une réponse, une chute, ou sur une question laissée en suspens. Jamais au milieu d'une phrase. Respecte ces durées : une partie trop longue sera recoupée au hasard.
-3. Chaque partie après la première commence ${H.recul - 1} à ${H.recul} secondes avant la fin de la précédente, au début d'une phrase, pour que le spectateur retrouve le fil.
-4. "titre" : le titre de la série, 6 mots maximum, en français. "resume" : de quoi parle la vidéo, une phrase, en français.
-Règles : les minutages doivent correspondre à ce qu'on voit et entend réellement. N'invente rien.
-${phrases.length ? `\nSous-titres de la vidéo, avec leurs minutages, pour couper pile en fin de phrase :\n${enLignes(phrases)}\n` : ""}
-Dis aussi si la vidéo supporte d'être recadrée en vertical.
-Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
-{${QUESTION_FORMAT},
-"serie": {"debut": secondes, "fin": secondes, "titre": "…", "resume": "…", "decoupes": {${durees.map((d) => `"${d}": [{"start": secondes, "end": secondes}, …]`).join(", ")}}}}`;
+export { dureesPour } from "./visionnage";
 
 export async function findHistoires(v: Video): Promise<HistoiresResult> {
   if (v.duration > DUREE_MAX_VIDEO) throw new Error(`Vidéo trop longue (plus de ${DUREE_MAX_VIDEO / 3600} h).`);
@@ -72,17 +55,15 @@ async function compute(v: Video): Promise<{ ok: boolean; value: HistoiresResult 
     decoupes: Object.fromEntries(durees.map((d) => [String(d), decouper(0, v.duration, [], d, H.partieMax, H.recul)])),
   }] } });
   if (!hasGemini()) return reguliere("Clé Gemini manquante : parties coupées à intervalles réguliers.");
-  const phrases = await sousTitres(v);
   let s: z.infer<typeof Serie>;
   try {
-    const raw = jsonIn(await geminiWatchYouTube(v.id, v.duration, prompt(v, durees, phrases), v.id));
-    lireAvecFormat(v.id, raw, "serie");
-    s = Serie.parse((raw as { serie?: unknown }).serie);
+    s = Serie.parse((await regarder(v)).serie);
   } catch (e) {
     if (e instanceof GeminiSurcharge) throw e;
     console.warn("[histoires] Gemini :", (e as Error).message);
     return reguliere("L'IA n'a pas pu regarder la vidéo : les parties sont coupées à intervalles réguliers.");
   }
+  const phrases = await sousTitres(v);
   const debut = Math.max(0, Math.round(s.debut)), fin = Math.min(v.duration, Math.round(s.fin) || v.duration);
   // Une durée que l'IA a mal découpée est recoupée chez nous, sur les coupures qu'elle a notées pour les autres
   // durées et les fins de phrase.

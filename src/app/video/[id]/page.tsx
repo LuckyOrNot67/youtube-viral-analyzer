@@ -14,7 +14,7 @@ type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = MomentCite;
 type Format = "vertical" | "bandes" | "horizontal";
 /** L'avis de l'IA sur le format (gardé pour tout le monde) et le choix de la personne, pour les Shorts ou pour les histoires. */
-type FormatInfo = { conseil: { format: Format; raison: string } | null; choix: Format | null };
+type FormatInfo = { conseil: { format: Format; raison: string; centreX?: number } | null; choix: Format | null };
 type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; format: FormatInfo; formule: { nom: string; shortsParVideo: number }; expireLe: number };
 type Etape = "commentaires" | "video" | "notes";
 const ETAPES: { id: Etape; label: string }[] = [
@@ -204,15 +204,15 @@ function ChoixFormat({ videoId, sorte, info, children }: { videoId: string; sort
     <div className="choix-format">
       <div className="cf-txt">
         <span className="stk pink">{sorte === "shorts" ? "Avant tes Shorts" : "Avant tes histoires"}</span>
-        <b className="h h-m">Cette vidéo est <span className="it acc">large.</span> Comment la cadrer ?</b>
-        <p className="sub">{info.conseil.raison} En plein écran vertical, on couperait l&apos;essentiel. Avec bandes, on garde le milieu de l&apos;image, bien plus large, avec des bandes noires en haut et en bas.</p>
+        <b className="h h-m">Comment cadrer cette vidéo <span className="it acc">pour TikTok ?</span></b>
+        <p className="sub">{info.conseil.raison} Avec bandes, l&apos;image reste verticale mais plus large, centrée sur les personnes, avec une petite bande noire en haut et en bas.</p>
         <p className="small">{sorte === "shorts" ? "Ce choix vaut pour tous les Shorts de cette vidéo (les histoires ont leur propre choix)." : "Ce choix vaut pour toutes les parties des histoires de cette vidéo (les Shorts ont leur propre choix)."} Il ne pourra plus être changé.</p>
         {err && <div className="notice bad" role="alert">{err}</div>}
       </div>
       <div className="cf-apercu" role="group" aria-label="Cadrage">
         {options.map((o) => (
           <button key={o.f} type="button" className={`cf-choix${o.f === reco ? " reco" : ""}`} disabled={envoi} onClick={() => choisir(o.f)}>
-            <span className={`cf-tel ${o.f}`}><img src={img} alt="" referrerPolicy="no-referrer" /></span>
+            <span className={`cf-tel ${o.f}`}><img src={img} alt="" referrerPolicy="no-referrer" style={{ objectPosition: `${Math.round((info.conseil?.centreX ?? 0.5) * 100)}% 50%` }} /></span>
             <b>{o.nom}</b>
             <span className="small">{o.f === reco ? "Conseillé" : o.dit}</span>
           </button>

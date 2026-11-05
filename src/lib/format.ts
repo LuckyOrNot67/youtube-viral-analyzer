@@ -12,20 +12,22 @@ import LIMITES from "@/config/limites.json";
  *  en haut et en bas (comme Remakeit) ; « horizontal » : l'image entière. */
 export type Format = "vertical" | "bandes" | "horizontal";
 export type Sorte = "shorts" | "histoires";
-export type Conseil = { format: Format; raison: string };
+/** `centreX` : où sont les personnes ou le sujet dans la largeur de l'image (0 à gauche, 0,5 au milieu, 1 à droite). */
+export type Conseil = { format: Format; raison: string; centreX?: number };
 
 /** À ajouter à chaque demande où Gemini regarde la vidéo : il donne son avis sur le format en même temps. */
-export const QUESTION_FORMAT = `"format": "vertical" si l'essentiel reste visible en recadrant l'image au centre en 9:16 (une personne face caméra, un sujet au milieu) ; "bandes" si l'essentiel tient dans le milieu de l'image en 3:4, plus large (deux personnes côte à côte, un plan un peu large) ; "horizontal" seulement s'il faut toute la largeur (écran partagé avec la personne d'un côté et l'écran de l'autre, texte ou démonstration sur toute la largeur)
-"raison_format": "pourquoi, une phrase courte, en français"`;
+export const QUESTION_FORMAT = `"format": le cadrage pour TikTok, qui est vertical. Préfère toujours le vertical, et ne choisis "horizontal" qu'en tout dernier recours. "vertical" si l'essentiel reste visible en plein écran 9:16 (une personne face caméra, un sujet assez groupé) ; sinon "bandes" : une image plus large (3:4), centrée sur les personnes, avec une petite bande noire en haut et en bas (deux personnes côte à côte, un plateau, un plan un peu large) ; "horizontal" seulement si c'est vraiment impossible autrement, parce que l'essentiel occupe toute la largeur (écran partagé avec la personne d'un côté et l'écran de l'autre, texte ou démonstration d'un bord à l'autre)
+"raison_format": "pourquoi, une phrase courte, en français"
+"centre_x": où se trouvent les personnes ou le sujet principal dans la largeur de l'image, la plupart du temps (0 = bord gauche, 0.5 = milieu, 1 = bord droit)`;
 
-const Avis = z.object({ format: z.enum(["vertical", "bandes", "horizontal"]), raison_format: z.string().default("") });
+const Avis = z.object({ format: z.enum(["vertical", "bandes", "horizontal"]), raison_format: z.string().default(""), centre_x: z.number().min(0).max(1).optional() });
 
 /** Lit la réponse de Gemini : { format, raison_format, <cle>: [...] }, ou l'ancien tableau seul. Garde l'avis. */
 export function lireAvecFormat(videoId: string, raw: unknown, cle: string): unknown {
   if (Array.isArray(raw)) return raw;
   const o = raw as Record<string, unknown>;
   const avis = Avis.safeParse(o);
-  if (avis.success) noterConseil(videoId, { format: avis.data.format, raison: avis.data.raison_format });
+  if (avis.success) noterConseil(videoId, { format: avis.data.format, raison: avis.data.raison_format, centreX: avis.data.centre_x });
   return o?.[cle] ?? [];
 }
 
