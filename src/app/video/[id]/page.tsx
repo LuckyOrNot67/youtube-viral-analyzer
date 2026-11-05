@@ -14,7 +14,7 @@ type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = MomentCite;
 type Format = "vertical" | "bandes" | "horizontal";
 /** L'avis de l'IA sur le format (gardé pour tout le monde) et le choix de la personne, pour les Shorts ou pour les histoires. */
-type FormatInfo = { conseil: { format: Format; raison: string; centreX?: number } | null; choix: Format | null };
+type FormatInfo = { conseil: { format: Format; raison: string; centreX?: number } | null; choix: Format | null; verrouille?: boolean };
 type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; format: FormatInfo; formule: { nom: string; shortsParVideo: number }; expireLe: number };
 type Etape = "commentaires" | "video" | "notes";
 const ETAPES: { id: Etape; label: string }[] = [
@@ -181,44 +181,72 @@ function SurchargeCarte({ videoId, sorte, email: avecEmail, onRetry }: { videoId
   );
 }
 
-/** Avant le résultat : si l'IA juge que le recadrage vertical cacherait l'essentiel, la personne choisit une fois
- *  pour toutes, à part pour les Shorts et pour les histoires. Sinon (ou une fois choisi), le résultat s'affiche directement. */
-function ChoixFormat({ videoId, sorte, info, children }: { videoId: string; sorte: Sorte; info: FormatInfo | undefined; children: ReactNode }) {
+const CADRAGES: { f: Format; nom: string; dit: string }[] = [
+  { f: "vertical", nom: "Plein écran", dit: "Les côtés sont coupés" },
+  { f: "bandes", nom: "Avec bandes", dit: "Plus large, petites bandes noires" },
+  { f: "horizontal", nom: "Image entière", dit: "Rien n'est coupé" },
+];
+const nomCadrage = (f: Format) => CADRAGES.find((c) => c.f === f)?.nom ?? f;
+
+/** Le cadrage des Shorts (ou des parties) : celui conseillé par l'IA s'applique par défaut. Quand l'IA déconseille le
+ *  plein écran, on montre d'abord les trois cadrages sur une vraie image de la vidéo. Ensuite une petite barre permet
+ *  d'en changer, tant que rien n'a été créé. */
+function ChoixFormat({ videoId, sorte, info, cree, children }: { videoId: string; sorte: Sorte; info: FormatInfo | undefined; cree: boolean; children: ReactNode }) {
   const [choix, setChoix] = useState<Format | null>(null);
+  const [ouvert, setOuvert] = useState(false);
   const [envoi, setEnvoi] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  if (!info?.conseil || info.conseil.format === "vertical" || choix || info.choix) return <>{children}</>;
-  const reco = info.conseil.format;
+  if (!info) return <>{children}</>;
+  const reco = info.conseil?.format ?? "vertical";
+  const actuel = choix ?? info.choix ?? reco;
+  const fige = Boolean(info.verrouille) || cree;
+  // La première fois, si l'IA déconseille le plein écran : on demande avant de montrer les résultats.
+  const premiereFois = !choix && !info.choix && reco !== "vertical" && !fige;
   const choisir = (format: Format) => {
     setEnvoi(true); setErr(null);
     api<{ choix: Format }>(`/api/video/${videoId}/format`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sorte, format }) })
-      .then((r) => setChoix(r.choix)).catch((e) => setErr(e.message)).finally(() => setEnvoi(false));
+      .then((r) => { setChoix(r.choix); setOuvert(false); }).catch((e) => setErr(e.message)).finally(() => setEnvoi(false));
   };
-  const img = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
-  const options: { f: Format; nom: string; dit: string }[] = [
-    { f: "bandes", nom: "Avec bandes", dit: "Le milieu, plus large" },
-    { f: "horizontal", nom: "Image entière", dit: "Rien n'est coupé" },
-    { f: "vertical", nom: "Plein écran", dit: "Les côtés sont coupés" },
-  ].map((o) => ({ ...o, f: o.f as Format }));
+  // Une vraie image du milieu de la vidéo (pas la miniature), cadrée comme le serait le Short.
+  const image = (f: Format) => (
+    <span className={`cf-tel ${f}`}>
+      <img src={`https://i.ytimg.com/vi/${videoId}/maxres2.jpg`} alt="" referrerPolicy="no-referrer"
+        style={{ objectPosition: `${Math.round((info.conseil?.centreX ?? 0.5) * 100)}% 50%` }}
+        onError={(e) => { const i = e.currentTarget; if (!i.src.includes("mq2")) i.src = `https://i.ytimg.com/vi/${videoId}/mq2.jpg`; }} />
+    </span>
+  );
+  if (premiereFois || ouvert) {
+    return (
+      <div className="choix-format">
+        <div className="cf-txt">
+          <span className="stk pink">{sorte === "shorts" ? "Avant tes Shorts" : "Avant tes histoires"}</span>
+          <b className="h h-m">Comment cadrer cette vidéo <span className="it acc">pour TikTok ?</span></b>
+          {info.conseil?.raison && <p className="sub">{info.conseil.raison}</p>}
+          <p className="small">{sorte === "shorts" ? "Ce cadrage vaut pour tous les Shorts de cette vidéo." : "Ce cadrage vaut pour toutes les parties des histoires de cette vidéo."} Tu peux en changer tant que tu n&apos;as rien créé.</p>
+          {ouvert && <button className="btn ghost sm" onClick={() => setOuvert(false)}>Garder « {nomCadrage(actuel)} »</button>}
+          {err && <div className="notice bad" role="alert">{err}</div>}
+        </div>
+        <div className="cf-apercu" role="group" aria-label="Cadrage">
+          {[...CADRAGES].sort((x, y) => Number(y.f === reco) - Number(x.f === reco)).map((o) => (
+            <button key={o.f} type="button" className={`cf-choix${o.f === reco ? " reco" : ""}${ouvert && o.f === actuel ? " on" : ""}`} disabled={envoi} onClick={() => choisir(o.f)}>
+              {image(o.f)}
+              <b>{o.nom}</b>
+              <span className="small">{o.f === reco ? "Conseillé" : o.dit}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className="choix-format">
-      <div className="cf-txt">
-        <span className="stk pink">{sorte === "shorts" ? "Avant tes Shorts" : "Avant tes histoires"}</span>
-        <b className="h h-m">Comment cadrer cette vidéo <span className="it acc">pour TikTok ?</span></b>
-        <p className="sub">{info.conseil.raison} Avec bandes, l&apos;image reste verticale mais plus large, centrée sur les personnes, avec une petite bande noire en haut et en bas.</p>
-        <p className="small">{sorte === "shorts" ? "Ce choix vaut pour tous les Shorts de cette vidéo (les histoires ont leur propre choix)." : "Ce choix vaut pour toutes les parties des histoires de cette vidéo (les Shorts ont leur propre choix)."} Il ne pourra plus être changé.</p>
-        {err && <div className="notice bad" role="alert">{err}</div>}
+    <>
+      <div className="cadrage-bar">
+        <span className="small">Cadrage : <b>{nomCadrage(actuel)}</b>{actuel === reco ? " (conseillé)" : ""}</span>
+        {fige ? <span className="small dim">· fixé, des {sorte === "shorts" ? "Shorts" : "parties"} sont déjà créés</span>
+          : <button className="btn ghost sm" onClick={() => setOuvert(true)}>Changer</button>}
       </div>
-      <div className="cf-apercu" role="group" aria-label="Cadrage">
-        {options.map((o) => (
-          <button key={o.f} type="button" className={`cf-choix${o.f === reco ? " reco" : ""}`} disabled={envoi} onClick={() => choisir(o.f)}>
-            <span className={`cf-tel ${o.f}`}><img src={img} alt="" referrerPolicy="no-referrer" style={{ objectPosition: `${Math.round((info.conseil?.centreX ?? 0.5) * 100)}% 50%` }} /></span>
-            <b>{o.nom}</b>
-            <span className="small">{o.f === reco ? "Conseillé" : o.dit}</span>
-          </button>
-        ))}
-      </div>
-    </div>
+      {children}
+    </>
   );
 }
 
@@ -268,7 +296,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
         </ol>
       )}
       {err && <div className="notice bad" role="alert">{err}</div>}
-      <ChoixFormat videoId={video.id} sorte="shorts" info={res?.format}>
+      <ChoixFormat videoId={video.id} sorte="shorts" info={res?.format} cree={made.size > 0}>
       {res && !passages.length && <p className="sub">Aucun passage trouvé.</p>}
       {passages.length > 0 && (
         <>
@@ -376,6 +404,7 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const possibles = LIMITES.histoires.durees.filter((d) => video.duration >= d * LIMITES.histoires.partiesMin);
   const [duree, setDuree] = useState(possibles[0] ?? 60);
   const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
+  const [cree, setCree] = useState(false);
   const run = useCallback((discret = false) => {
     if (!discret) { setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(null); }
     flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
@@ -407,15 +436,15 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
       {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2>{choixDuree}</div>}
       {load && <Waiting since={t0} label="L'IA regarde la vidéo et note où couper… 1 à 3 min" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
-      <ChoixFormat videoId={video.id} sorte="histoires" info={res?.format}>
+      <ChoixFormat videoId={video.id} sorte="histoires" info={res?.format} cree={cree}>
         {res?.avertissement && <p className="sub">{res.avertissement}</p>}
-        {res?.histoires.map((h) => <UneHistoire key={`${duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={duree} onSeek={onSeek} />)}
+        {res?.histoires.map((h) => <UneHistoire key={`${duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={duree} onSeek={onSeek} onCree={() => setCree(true)} />)}
       </ChoixFormat>
     </section>
   );
 }
 
-function UneHistoire({ videoId, h, duree, onSeek }: { videoId: string; h: Histoire; duree: number; onSeek: (s: number, e?: number) => void }) {
+function UneHistoire({ videoId, h, duree, onSeek, onCree }: { videoId: string; h: Histoire; duree: number; onSeek: (s: number, e?: number) => void; onCree: () => void }) {
   // Les parties demandées, dans l'ordre : une seule se crée à la fois, les autres attendent leur tour.
   const [file, setFile] = useState<number[]>([]);
   const [finies, setFinies] = useState<Set<number>>(new Set());
@@ -423,7 +452,7 @@ function UneHistoire({ videoId, h, duree, onSeek }: { videoId: string; h: Histoi
   // Les coupures notées par l'IA pour cette durée ; sinon on recoupe chez nous sur ses moments de suspense.
   const parties = h.decoupes?.[String(duree)] ?? h.parties ?? decouper(h.start, h.end, h.suspense, duree, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
   const enCours = file.find((n) => !finies.has(n));
-  const demander = (ns: number[]) => setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]);
+  const demander = (ns: number[]) => { onCree(); setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]); };
   return (
     <div className="story">
       <div className="col" style={{ gap: 6 }}>

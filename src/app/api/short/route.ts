@@ -8,7 +8,7 @@ import { cleHistoires, type HistoiresResult } from "@/lib/ai/histoires";
 import type { Cadrage } from "@/lib/short";
 import { formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
-import { choixDe } from "@/lib/format";
+import { cadrageDe } from "@/lib/format";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ const Body = z.object({
   videoId: z.string().regex(VIDEO_ID),
   start: z.number().min(0),
   end: z.number().positive(),
-  /** Ignoré : le format vient du choix fait pour les Shorts ou les histoires de la vidéo (vertical par défaut). */
+  /** Ignoré : le cadrage vient du choix fait pour les Shorts ou les histoires de la vidéo, sinon du conseil de l'IA. */
   cadrage: z.enum(["centre", "entier", "horizontal", "bandes"]).optional(),
   titre: z.string().max(300).optional(),
   /** Une partie d'histoire : le numéro de la partie et l'histoire entière (pour vérifier que la partie en fait bien partie). */
@@ -38,7 +38,8 @@ export async function POST(req: Request) {
     const { video } = await videoDetail(videoId);
     if (end > video.duration + 1) throw new UserError("Ce passage dépasse la fin de la vidéo.");
     const uid = await userId();
-    const choix = choixDe(uid, videoId, h ? "histoires" : "shorts");
+    // Le choix de la personne, sinon le cadrage conseillé par l'IA (jamais le plein écran par défaut s'il coupe l'essentiel).
+    const choix = cadrageDe(uid, videoId, h ? "histoires" : "shorts");
     const cadrage: Cadrage = choix === "horizontal" ? "horizontal" : choix === "bandes" ? "bandes" : "centre";
 
     if (h) return NextResponse.json({ id: partieHistoire(uid, video, { start, end, cadrage, titre: b.data.titre ?? "", h }) });

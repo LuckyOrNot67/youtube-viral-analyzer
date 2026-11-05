@@ -5,8 +5,9 @@ import LIMITES from "@/config/limites.json";
 
 // Format de sortie d'une vidéo. Recadrer en vertical marche pour une personne face caméra, pas pour un écran
 // partagé, un plan large ou deux personnes éloignées : on n'y verrait presque rien. Gemini le dit en regardant la
-// vidéo (avis gardé pour tout le monde), la personne choisit une fois pour toutes, séparément pour les Shorts et
-// pour les histoires (on peut vouloir les Shorts en horizontal et les parties en vertical), et tout sort dans ce format.
+// vidéo (avis gardé pour tout le monde) et son conseil s'applique par défaut. La personne peut choisir un autre
+// cadrage, séparément pour les Shorts et pour les histoires, et en changer tant qu'elle n'a rien créé : ensuite tout
+// sort dans le même cadrage.
 
 /** « vertical » : plein écran recadré au milieu ; « bandes » : le milieu de l'image, plus large, avec des bandes noires
  *  en haut et en bas (comme Remakeit) ; « horizontal » : l'image entière. */
@@ -43,11 +44,22 @@ export function choixDe(uid: string, videoId: string, sorte: Sorte): Format | nu
   return r?.format ?? null;
 }
 
-/** Définitif : un second choix ne change rien. Renvoie le choix enregistré. */
-export function choisir(uid: string, videoId: string, sorte: Sorte, f: Format): Format {
-  db().prepare("INSERT OR IGNORE INTO choix_format (user, video, sorte, format, at) VALUES (?, ?, ?, ?, ?)").run(uid, videoId, sorte, f, Date.now());
-  return choixDe(uid, videoId, sorte)!;
+/** Des Shorts (ou des parties) déjà créés dans un cadrage : on ne le change plus, pour que tout sorte pareil. */
+export function verrouille(uid: string, videoId: string, sorte: Sorte): boolean {
+  const r = db().prepare(`SELECT 1 FROM shorts WHERE user = ? AND video = ? AND etat != 'erreur' AND partie IS ${sorte === "histoires" ? "NOT " : ""}NULL LIMIT 1`).get(uid, videoId);
+  return Boolean(r);
 }
 
-/** Ce que l'écran doit savoir : l'avis de l'IA et le choix déjà fait pour ces Shorts ou ces histoires. */
-export const formatPour = (uid: string, videoId: string, sorte: Sorte) => ({ conseil: conseilDe(videoId), choix: choixDe(uid, videoId, sorte) });
+/** Change le cadrage tant que rien n'a été créé ; ensuite le choix ne bouge plus. Renvoie le cadrage en vigueur. */
+export function choisir(uid: string, videoId: string, sorte: Sorte, f: Format): Format {
+  if (!verrouille(uid, videoId, sorte)) {
+    db().prepare("INSERT OR REPLACE INTO choix_format (user, video, sorte, format, at) VALUES (?, ?, ?, ?, ?)").run(uid, videoId, sorte, f, Date.now());
+  }
+  return cadrageDe(uid, videoId, sorte);
+}
+
+/** Le cadrage qui s'applique : le choix de la personne, sinon le conseil de l'IA, sinon le plein écran vertical. */
+export const cadrageDe = (uid: string, videoId: string, sorte: Sorte): Format => choixDe(uid, videoId, sorte) ?? conseilDe(videoId)?.format ?? "vertical";
+
+/** Ce que l'écran doit savoir : l'avis de l'IA, le choix fait et si on peut encore en changer. */
+export const formatPour = (uid: string, videoId: string, sorte: Sorte) => ({ conseil: conseilDe(videoId), choix: choixDe(uid, videoId, sorte), verrouille: verrouille(uid, videoId, sorte) });
