@@ -6,7 +6,6 @@ import { logCost } from "./events";
 // Clés dans .env.local uniquement, jamais envoyées au navigateur.
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
-const GEMINI_FALLBACKS = ["gemini-3.5-flash", "gemini-3.8-flash"];
 /** Images regardées par seconde de vidéo. Par défaut Gemini en prend environ 1 ; à 0,5, une vidéo de 30 min passe de
  *  ~103 k à ~66 k jetons, mêmes passages trouvés aux mêmes minutages (mesuré sur 4MphCDK8fWg). Le son reste entier. */
 const GEMINI_FPS = Number(process.env.GEMINI_FPS ?? 0.5);
@@ -30,13 +29,21 @@ export function claude(projet: string) {
   return c;
 }
 
+/** Gemini saturé (ou trop lent) même après quelques essais. On réessaiera plus tard, sans jamais passer à un modèle
+ *  plus cher : un modèle de secours coûte 2,5 à 5 fois plus et ferait tomber la marge sous 80 %. */
+export class GeminiSurcharge extends Error {
+  constructor() { super("Gemini est surchargé en ce moment."); }
+}
+/** Pauses entre deux essais quand Gemini répond « saturé ». */
+const PAUSES = [5_000, 15_000, 30_000];
+
 /** Gemini regarde une vidéo YouTube publique à partir de son lien (aucun téléchargement de notre côté).
- *  Un modèle saturé ou trop lent passe la main au suivant. */
+ *  Toujours le même modèle : saturé, on attend un peu et on réessaie ; toujours saturé, GeminiSurcharge. */
 export async function geminiWatchYouTube(videoId: string, duree: number, prompt: string, projet: string, timeoutMs = 240_000): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const uri = `https://www.youtube.com/watch?v=${videoId}`;
-  let last: unknown;
-  for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACKS.filter((m) => m !== GEMINI_MODEL)]) {
+  const model = GEMINI_MODEL;
+  for (let essai = 0; ; essai++) {
     const t0 = Date.now();
     try {
       const res = await ai.interactions.create({
@@ -49,13 +56,15 @@ export async function geminiWatchYouTube(videoId: string, duree: number, prompt:
       logCost(projet, "gemini", { modele: model, ms: Date.now() - t0, usage: (res as { usage?: unknown }).usage ?? null });
       return out;
     } catch (e) {
-      last = e;
       const status = (e as { status?: number }).status;
-      console.warn(`[gemini] ${model} : ${status ?? (e as Error).message}`);
-      if (status && status !== 503 && status !== 429 && status !== 500) throw e;
+      console.warn(`[gemini] ${model}, essai ${essai + 1} : ${status ?? (e as Error).message}`);
+      // Sans statut : délai dépassé (déjà 4 min d'attente), on ne relance pas tout de suite.
+      if (!status) throw (e as Error).message === "Gemini n'a rien répondu." ? e : new GeminiSurcharge();
+      if (status !== 503 && status !== 429 && status !== 500) throw e;
+      if (essai >= PAUSES.length) throw new GeminiSurcharge();
+      await new Promise((r) => setTimeout(r, PAUSES[essai]));
     }
   }
-  throw last;
 }
 
 /** Premier bloc JSON d'un texte (Gemini l'entoure parfois de ```json). */

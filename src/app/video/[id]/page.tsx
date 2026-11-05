@@ -3,15 +3,15 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpen, Download, Flame, Loader2, MessageCircle, Scissors, Sparkles } from "lucide-react";
+import { BookOpen, Download, Flame, Loader2, Scissors, Sparkles } from "lucide-react";
 import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import { Cover } from "@/components/Cover";
-import type { Channel, CommentsAnalysis, Extrait, ScoredVideo } from "@/lib/types";
+import type { Channel, Extrait, MomentCite, ScoredVideo } from "@/lib/types";
 import { decouper } from "@/lib/decoupe";
 import LIMITES from "@/config/limites.json";
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
-type Moment = CommentsAnalysis["moments"][number];
+type Moment = MomentCite;
 type Format = "vertical" | "horizontal";
 /** L'avis de l'IA sur le format (gardé pour tout le monde) et le choix de la personne, pour les Shorts ou pour les histoires. */
 type FormatInfo = { conseil: { format: Format; raison: string } | null; choix: Format | null };
@@ -32,6 +32,9 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return j as T;
 }
 
+/** Gemini saturé : le serveur réessaie tout seul, l'écran propose d'être prévenu par email. */
+class Surcharge extends Error {}
+
 /** Lit une réponse envoyée ligne par ligne (une ligne JSON par étape), jusqu'au résultat. */
 async function flux<T>(url: string, onLigne: (m: { etape?: Etape }) => void = () => {}): Promise<T> {
   const r = await fetch(url, { method: "POST" });
@@ -45,7 +48,8 @@ async function flux<T>(url: string, onLigne: (m: { etape?: Etape }) => void = ()
     const lines = buf.split("\n");
     buf = lines.pop() ?? "";
     for (const l of lines.filter(Boolean)) {
-      const m = JSON.parse(l) as { etape?: Etape; resultat?: T; error?: string };
+      const m = JSON.parse(l) as { etape?: Etape; resultat?: T; error?: string; surcharge?: boolean };
+      if (m.surcharge) throw new Surcharge();
       if (m.error) throw new Error(m.error);
       if (m.resultat) return m.resultat;
       onLigne(m);
@@ -114,7 +118,6 @@ export default function VideoPage() {
           <Histoires video={v} onSeek={seek} />
         </>
       )}
-      <Comments videoId={v.id} onSeek={seek} />
 
       {d.voisines.length > 0 && (
         <div className="col" style={{ gap: 10 }}>
@@ -146,6 +149,35 @@ function Crit({ label, p }: { label: string; p: number }) {
 type Passage = { start: number; end: number; hook: string; titre: string; note: number | null };
 
 type Sorte = "shorts" | "histoires";
+
+/** Gemini surchargé : on explique, on réessaie côté serveur, et la personne peut laisser son email. */
+function SurchargeCarte({ videoId, sorte, onRetry }: { videoId: string; sorte: Sorte; onRetry: () => void }) {
+  const [email, setEmail] = useState("");
+  const [etat, setEtat] = useState<"" | "envoi" | "ok" | "pret">("");
+  const [err, setErr] = useState<string | null>(null);
+  const envoyer = (e: React.FormEvent) => {
+    e.preventDefault(); setEtat("envoi"); setErr(null);
+    api<{ ok?: boolean; pret?: boolean }>(`/api/video/${videoId}/prevenir`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, sorte }) })
+      .then((r) => setEtat(r.pret ? "pret" : "ok")).catch((x) => { setErr(x.message); setEtat(""); });
+  };
+  return (
+    <div className="story" role="status">
+      <span className="stk pink">L&apos;IA est très demandée</span>
+      <b className="story-t">Gemini est surchargé en ce moment.</b>
+      <p className="small">Ça se débloque en général en 2 à 3 minutes. On réessaie tout seul toutes les 2 minutes : rien n&apos;est décompté de ta formule tant que ce n&apos;est pas prêt.</p>
+      {etat === "ok" ? <div className="notice">C&apos;est noté : on t&apos;écrit à {email} dès que c&apos;est prêt.</div>
+        : etat === "pret" ? <div className="notice">C&apos;est déjà prêt : clique sur « Réessayer ».</div>
+        : (
+          <form className="row" style={{ gap: 8, flexWrap: "wrap" }} onSubmit={envoyer}>
+            <input id={`prevenir-${sorte}`} type="email" required placeholder="ton@email.fr" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Ton email" className="input" style={{ flex: "1 1 200px" }} />
+            <button className="btn lime" disabled={etat === "envoi"}>Préviens-moi</button>
+          </form>
+        )}
+      {err && <div className="notice bad" role="alert">{err}</div>}
+      <button className="btn ghost sm" onClick={onRetry}>Réessayer maintenant</button>
+    </div>
+  );
+}
 
 /** Avant le résultat : si l'IA juge que le recadrage vertical cacherait l'essentiel, la personne choisit une fois
  *  pour toutes, à part pour les Shorts et pour les histoires. Sinon (ou une fois choisi), le résultat s'affiche directement. */
@@ -189,14 +221,16 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   const [vu, setVu] = useState<number | null>(null);
   const [t0, setT0] = useState(0);
   const [etape, setEtape] = useState<Etape | null>(null);
+  const [surcharge, setSurcharge] = useState(false);
 
   const run = async () => {
-    setState("load"); setErr(null); setT0(Date.now()); setEtape(null);
+    setState("load"); setErr(null); setT0(Date.now()); setEtape(null); setSurcharge(false);
     try {
       const r = await flux<ExtraitsRes>(`/api/video/${video.id}/extraits`, (m) => { if (m.etape) { setEtape(m.etape); setT0(Date.now()); } });
       setRes(r); setState("done");
     } catch (e) {
-      setErr((e as Error).message); setState("idle");
+      if (e instanceof Surcharge) setSurcharge(true); else setErr((e as Error).message);
+      setState("idle");
     }
   };
 
@@ -209,7 +243,8 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
 
   return (
     <section className="col" style={{ gap: 12 }}>
-      {state === "idle" && <button className="btn lime arrowed big" onClick={run}><span className="row" style={{ gap: 10 }}><Sparkles size={20} /> Trouver les Shorts</span><span className="arrow"><Scissors size={17} /></span></button>}
+      {surcharge && state === "idle" && <SurchargeCarte videoId={video.id} sorte="shorts" onRetry={run} />}
+      {state === "idle" && !surcharge && <button className="btn lime arrowed big" onClick={run}><span className="row" style={{ gap: 10 }}><Sparkles size={20} /> Trouver les Shorts</span><span className="arrow"><Scissors size={17} /></span></button>}
       {state === "load" && (
         <ol className="col small" style={{ gap: 6, listStyle: "none", padding: 0, margin: 0 }} aria-live="polite">
           {ETAPES.map((e, i) => {
@@ -308,14 +343,16 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [t0, setT0] = useState(0);
   // Demandée avant de lancer : l'IA trouve les moments de suspense une fois, la durée choisie décide où couper.
   const [duree, setDuree] = useState(LIMITES.histoires.durees[0]);
+  const [surcharge, setSurcharge] = useState(false);
   const run = () => {
-    setLoad(true); setErr(null); setT0(Date.now());
+    setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(false);
     flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
-      .then(setRes).catch((e) => setErr(e.message)).finally(() => setLoad(false));
+      .then(setRes).catch((e) => (e instanceof Surcharge ? setSurcharge(true) : setErr(e.message))).finally(() => setLoad(false));
   };
   return (
     <section className="col" style={{ gap: 12 }}>
-      {!res && !load && (
+      {surcharge && !load && <SurchargeCarte videoId={video.id} sorte="histoires" onRetry={run} />}
+      {!res && !load && !surcharge && (
         <div className="story">
           <b className="story-t">Découper en histoires</b>
           <p className="small">L&apos;IA trouve les histoires complètes de la vidéo et les coupe en parties qui donnent envie de voir la suite. Combien de temps par partie ?</p>
@@ -376,43 +413,6 @@ function UneHistoire({ videoId, h, durees, depart, onSeek }: { videoId: string; 
       {file.length < parties.length && <button className="btn lime" onClick={() => demander(parties.map((p) => p.n))}>Créer les {parties.length} parties</button>}
       {enCours !== undefined && <p className="small">Une partie à la fois, environ 1 min chacune : télécharge-la dès qu&apos;elle est prête, la suivante démarre toute seule.</p>}
     </div>
-  );
-}
-
-function Comments({ videoId, onSeek }: { videoId: string; onSeek: (s: number) => void }) {
-  const [res, setRes] = useState<CommentsAnalysis | null>(null);
-  const [load, setLoad] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [t0, setT0] = useState(0);
-  const run = () => {
-    setLoad(true); setErr(null); setT0(Date.now());
-    api<CommentsAnalysis>(`/api/video/${videoId}/commentaires`, { method: "POST" })
-      .then(setRes).catch((e) => setErr(e.message)).finally(() => setLoad(false));
-  };
-  return (
-    <section className="col" style={{ gap: 10 }}>
-      {!res && !load && <button className="btn ghost" onClick={run}><MessageCircle size={18} /> Ce que disent les spectateurs</button>}
-      {(res || load) && <h2 className="h h-m">Ce que disent les <span className="it acc">spectateurs</span></h2>}
-      {load && <Waiting since={t0} label="Lecture…" />}
-      {err && <div className="notice bad" role="alert">{err}</div>}
-      {res && (
-        <div className="col" style={{ gap: 10 }}>
-          {res.moments.length > 0 && (
-            <div className="card green">
-              <b>Moments cités</b>
-              {res.moments.slice(0, 5).map((m) => (
-                <button key={m.t} className="row" style={{ background: "none", border: 0, padding: 0, textAlign: "left", alignItems: "flex-start" }} onClick={() => onSeek(Math.max(0, m.t - 3))}>
-                  <span className="time" style={{ minWidth: 52 }}>{fmtDur(m.t)}</span>
-                  <span className="small" style={{ color: "var(--text)" }}>« {m.exemples[0]} »</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {res.questions.length > 0 && <div className="card blue"><b>Leurs questions</b><ul className="list">{res.questions.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-          {res.idees.length > 0 && <div className="card pink"><b>Idées de Shorts</b><ul className="list">{res.idees.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-        </div>
-      )}
-    </section>
   );
 }
 

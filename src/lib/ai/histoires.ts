@@ -3,7 +3,7 @@ import * as z from "zod/v4";
 import { cacheGet, cacheSet } from "../db";
 import { fmtTime } from "../parse";
 import type { Video } from "../types";
-import { geminiWatchYouTube, hasGemini, jsonIn } from "./models";
+import { GeminiSurcharge, geminiWatchYouTube, hasGemini, jsonIn } from "./models";
 import { DUREE_MAX_VIDEO } from "./extraits";
 import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
@@ -55,6 +55,7 @@ async function compute(v: Video): Promise<{ ok: boolean; value: HistoiresResult 
   try {
     brutes = z.array(Brute).parse(lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, prompt(v), v.id)), "histoires"));
   } catch (e) {
+    if (e instanceof GeminiSurcharge) throw e;
     console.warn("[histoires] Gemini :", (e as Error).message);
     return { ok: false, value: { creeLe, histoires: [], avertissement: "La vidéo n'a pas pu être regardée par l'IA (vidéo privée, réservée aux adultes ou trop récente)." } };
   }

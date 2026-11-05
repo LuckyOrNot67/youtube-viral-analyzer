@@ -5,6 +5,8 @@ import { coutVideo, histoiresPayees, payerHistoires } from "@/lib/analyses";
 import { assertUsage, countUsage, formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
 import { formatPour } from "@/lib/format";
+import { GeminiSurcharge } from "@/lib/ai/models";
+import { relancer } from "@/lib/relance";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -40,7 +42,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
           }
           send({ resultat: { ...r, format: formatPour(uid, id, "histoires"), durees: LIMITES.histoires.durees, formule: { nom: formule().nom } } });
         } catch (e) {
-          send({ error: (await fail(e).json()).error });
+          if (e instanceof GeminiSurcharge) { relancer("histoires", video); send({ surcharge: true }); }
+          else send({ error: (await fail(e).json()).error });
         } finally {
           clearInterval(pouls);
         }

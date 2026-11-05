@@ -9,7 +9,7 @@ import LIMITES from "@/config/limites.json";
 const FILE = path.join(process.cwd(), ".cache", "data.db");
 
 // Changer SCHEMA quand on ajoute une table : la connexion déjà ouverte (serveur de dev) recrée alors les tables.
-const SCHEMA = 5;
+const SCHEMA = 6;
 const g = globalThis as unknown as { __yvaDb?: DatabaseSync; __yvaSchema?: number };
 
 export function db(): DatabaseSync {
@@ -28,6 +28,7 @@ export function db(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS shorts (id TEXT PRIMARY KEY, user TEXT NOT NULL, video TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL,
       cadrage TEXT NOT NULL, titre TEXT NOT NULL, video_titre TEXT NOT NULL, etat TEXT NOT NULL, erreur TEXT, at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS shorts_user ON shorts (user, at);
+    CREATE TABLE IF NOT EXISTS a_prevenir (email TEXT NOT NULL, video TEXT NOT NULL, sorte TEXT NOT NULL, origine TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (email, video, sorte));
     CREATE TABLE IF NOT EXISTS choix_format (user TEXT NOT NULL, video TEXT NOT NULL, sorte TEXT NOT NULL, format TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user, video, sorte));
   `);
   // Colonnes ajoutées après coup (l'erreur « colonne déjà là » est normale).

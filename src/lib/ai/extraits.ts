@@ -6,7 +6,7 @@ import { fmtTime } from "../parse";
 import type { Extrait, Video } from "../types";
 import { commentsOf } from "./comments";
 import { citationsIn, citedMoments, type Moment } from "./moments";
-import { claude, CLAUDE_MODEL, geminiWatchYouTube, hasClaude, hasGemini, jsonIn } from "./models";
+import { claude, CLAUDE_MODEL, GeminiSurcharge, geminiWatchYouTube, hasClaude, hasGemini, jsonIn } from "./models";
 import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
 
@@ -72,6 +72,8 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
     const raw = lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, watchPrompt(v, moments), v.id)), "passages");
     candidates = z.array(Candidate).parse(raw);
   } catch (e) {
+    // Saturé : rien n'est gardé, on réessaiera (voir relance.ts).
+    if (e instanceof GeminiSurcharge) throw e;
     console.warn("[extraits] Gemini :", (e as Error).message);
     return { creeLe, extraits: [], moments, source: "commentaires", avertissement: "La vidéo n'a pas pu être regardée par l'IA (vidéo privée, réservée aux adultes ou trop récente). Voici les moments cités par les spectateurs." };
   }

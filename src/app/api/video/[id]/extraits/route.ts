@@ -4,6 +4,8 @@ import { analyseDe, attribuerLot, coutVideo, lotDe, passagesDe } from "@/lib/ana
 import { assertUsage, countUsage, formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
 import { formatPour } from "@/lib/format";
+import { GeminiSurcharge } from "@/lib/ai/models";
+import { relancer } from "@/lib/relance";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -45,7 +47,9 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
           const { nom, shortsParVideo } = formule();
           send({ resultat: { ...r, extraits, format: formatPour(uid, id, "shorts"), formule: { nom, shortsParVideo }, expireLe: r.creeLe + LIMITES.analyse.conservationJours * 86400_000 } });
         } catch (e) {
-          send({ error: (await fail(e).json()).error });
+          // Gemini saturé : rien n'est compté, le serveur réessaie tout seul toutes les 2 minutes.
+          if (e instanceof GeminiSurcharge) { relancer("shorts", video); send({ surcharge: true }); }
+          else send({ error: (await fail(e).json()).error });
         } finally {
           clearInterval(pouls);
         }

@@ -82,12 +82,5 @@ export type Extrait = {
   citations: number;
 };
 
-export type CommentsAnalysis = {
-  total: number | null;
-  lus: number;
-  moments: { t: number; n: number; likes: number; exemples: string[] }[];
-  sujets: string[];
-  questions: string[];
-  reactions: string;
-  idees: string[];
-};
+/** Un moment de la vidéo cité dans les commentaires (« 12:30 »), avec quelques exemples. */
+export type MomentCite = { t: number; n: number; likes: number; exemples: string[] };

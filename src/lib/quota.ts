@@ -41,8 +41,8 @@ export function quotaStatus() {
 
 // ===== Limites par personne (identifiant anonyme en cookie, en attendant les comptes) =====
 // Deux compteurs suivent la formule : les recherches (par jour) et les vidéos analysées (par mois).
-// Les Shorts sont inclus, plafonnés par vidéo ; les commentaires gardent un simple garde-fou par jour.
-export type Kind = "recherches" | "videos" | "histoires" | "commentaires";
+// Les Shorts sont inclus, plafonnés par vidéo.
+export type Kind = "recherches" | "videos" | "histoires";
 type NomFormule = "createur" | "expert" | "pro";
 export type Formule = { id: NomFormule; nom: string; recherchesParJour: number; videosParMois: number; shortsParVideo: number; histoiresParMois: number };
 
@@ -53,14 +53,14 @@ export function formule(): Formule {
   return { id, ...F[id] };
 }
 
-const LABEL: Record<Kind, string> = { recherches: "recherches", videos: "vidéos analysées", histoires: "vidéos découpées en histoires", commentaires: "analyses de commentaires" };
+const LABEL: Record<Kind, string> = { recherches: "recherches", videos: "vidéos analysées", histoires: "vidéos découpées en histoires" };
 const parMois = (k: Kind) => k === "videos" || k === "histoires";
 /** Période du compteur : le jour du quota YouTube, ou le mois pour les vidéos. */
 const periode = (k: Kind) => (parMois(k) ? quotaDay().slice(0, 7) : quotaDay());
 
 function limite(user: string, k: Kind): number {
   const f = formule();
-  return k === "recherches" ? f.recherchesParJour : k === "videos" ? f.videosParMois : k === "histoires" ? f.histoiresParMois : LIMITES.parUtilisateurParJour.commentaires;
+  return k === "recherches" ? f.recherchesParJour : k === "videos" ? f.videosParMois : f.histoiresParMois;
 }
 
 export function usageOf(user: string, kind: Kind): number {

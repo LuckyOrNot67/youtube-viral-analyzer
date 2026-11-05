@@ -1,9 +1,5 @@
 {
   "_note": "Limites réglables sans toucher au code. Quotas YouTube officiels par défaut : 10 000 unités par jour + 100 appels search.list par jour, remis à zéro à minuit heure du Pacifique.",
-  "parUtilisateurParJour": {
-    "_note": "Garde-fous par jour, en plus de la formule (les recherches, elles, suivent la formule).",
-    "commentaires": 10
-  },
   "global": {
     "unitesParJour": 10000,
     "recherchesParJour": 100,
@@ -33,35 +29,40 @@
     "dureeMax": 90
   },
   "formules": {
-    "_note": "Pas de formule gratuite. En attendant les comptes et le paiement, tout le monde a la formule par défaut (FORMULE=expert dans .env.local pour en essayer une autre). Annuel = -30 %.",
+    "_note": "Pas de formule gratuite. En attendant les comptes et le paiement (Whop), tout le monde a la formule par défaut (FORMULE=expert dans .env.local pour en essayer une autre). À l'année : 2 mois offerts (10 mois payés pour 12). Grille calculée pour garder au moins 80 % du prix hors TVA au mois, même si l'abonné utilise tout avec les vidéos les plus chères (voir la propale).",
     "parDefaut": "createur",
     "createur": {
       "nom": "Créateur",
-      "prixMois": 12,
-      "prixMoisAnnuel": 8.4,
+      "prixMois": 19.9,
+      "prixMoisAnnuel": 16.58,
       "recherchesParJour": 10,
-      "videosParMois": 30,
+      "videosParMois": 25,
       "shortsParVideo": 5,
       "histoiresParMois": 10
     },
     "expert": {
       "nom": "Expert",
-      "prixMois": 24,
-      "prixMoisAnnuel": 16.8,
+      "prixMois": 39.9,
+      "prixMoisAnnuel": 33.25,
       "recherchesParJour": 25,
-      "videosParMois": 70,
+      "videosParMois": 55,
       "shortsParVideo": 10,
       "histoiresParMois": 20
     },
     "pro": {
       "nom": "Pro",
-      "prixMois": 49,
-      "prixMoisAnnuel": 34.3,
+      "prixMois": 79.9,
+      "prixMoisAnnuel": 66.58,
       "recherchesParJour": 50,
-      "videosParMois": 200,
-      "shortsParVideo": 15,
+      "videosParMois": 100,
+      "shortsParVideo": 20,
       "histoiresParMois": 60
     }
+  },
+  "offresSpeciales": {
+    "_note": "Pas encore branchées : elles arrivent avec les comptes et Whop. La semaine n'est jamais affichée sur la page des tarifs, elle est proposée par email à qui a fait l'aperçu sans payer. Le pass à vie n'existe que pendant le lancement.",
+    "semaine": { "nom": "Essai 7 jours", "prix": 6.99, "recherchesParJour": 5, "videosParSemaine": 6, "shortsParVideo": 5, "histoiresParSemaine": 2, "relanceApresHeures": 24 },
+    "vie": { "nom": "Pass à vie", "prix": 249, "places": 300, "commeFormule": "createur" }
   },
   "analyse": {
     "_note": "Chaque heure de vidéo commencée compte pour 1 (1 h 30 compte pour 2, 2 h 30 pour 3). L'IA propose un grand choix de passages ; chaque groupe de 10 personnes reçoit sa propre sélection. Tout (analyse, passages téléchargés, Shorts) est gardé 7 jours, puis il faut refaire l'analyse.",
@@ -71,7 +72,7 @@
     "conservationJours": 7
   },
   "histoires": {
-    "_note": "Histoires en parties (Partie 1, 2, 3…) : l'IA trouve les histoires complètes d'une vidéo et les moments de suspense où couper. Une vidéo découpée en histoires compte 1 sur le compteur histoires (2 au-delà d'1 h), toutes ses parties sont incluses.",
+    "_note": "Histoires en parties (Partie 1, 2, 3…) : l'IA trouve les histoires complètes d'une vidéo et les moments de suspense où couper. Chaque heure de vidéo découpée compte pour 1 sur le compteur histoires, toutes ses parties sont incluses.",
     "dureeMin": 120,
     "partieMax": 180,
     "durees": [

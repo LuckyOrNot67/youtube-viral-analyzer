@@ -328,3 +328,7 @@ details.more summary { padding: 4px 2px; }
 .cf-tel.v img { object-fit: cover; }
 .cf-tel.v { opacity: .55; }
 @media (max-width: 620px) { .choix-format { grid-template-columns: 1fr; } .cf-apercu { justify-content: center; } }
+
+/* Champ simple (email « Préviens-moi ») */
+.input { font: inherit; font-size: 15px; padding: 11px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text); min-width: 0; }
+.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
