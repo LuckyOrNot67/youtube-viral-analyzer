@@ -340,13 +340,17 @@ function ExportShort({ videoId, start, end, titre, legende, histoire, onFin }: {
   );
 }
 
+/** Légende suggérée pour une partie d'histoire, sans IA : le format « partie 1, 2, 3… » de TikTok. */
+const legendePartie = (titre: string, n: number, total: number) =>
+  `${titre} (partie ${n}/${total})\n${n < total ? `La suite dans la partie ${n + 1} 👀` : "Fin de l'histoire. Tu veux la prochaine ?"}\n\n#storytime #partie${n} #histoirevraie #pourtoi`;
+
 /** La légende à poster (description et hashtags), à copier d'un clic. */
 function Legende({ texte }: { texte: string }) {
   const [copie, setCopie] = useState(false);
   const copier = () => navigator.clipboard.writeText(texte).then(() => { setCopie(true); setTimeout(() => setCopie(false), 1500); }).catch(() => {});
   return (
     <div className="legende">
-      <span className="mono dim">Légende à poster</span>
+      <span className="mono dim">Légende suggérée · à adapter</span>
       <p>{texte}</p>
       <button className="btn ghost sm" onClick={copier}>{copie ? "Copiée" : "Copier la légende"}</button>
     </div>
@@ -424,6 +428,7 @@ function UneHistoire({ videoId, h, durees, depart, onSeek }: { videoId: string; 
           <div key={`${cible}-${p.n}`} className={`cover-col${finies.has(p.n) || enCours === p.n ? " wide" : ""}`}>
             {finies.has(p.n) || enCours === p.n
               ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }}
+                  legende={legendePartie(h.titre, p.n, parties.length)}
                   onFin={() => setFinies((f) => new Set(f).add(p.n))} />
               : <>
                   <Cover videoId={videoId} decale={DECALAGES[p.n % DECALAGES.length]} actif={vue === p.n} onClick={() => { setVue(p.n); onSeek(p.start, p.end); }}

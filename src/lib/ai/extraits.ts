@@ -9,6 +9,7 @@ import { citationsIn, citedMoments, type Moment } from "./moments";
 import { claude, CLAUDE_MODEL, GeminiSurcharge, geminiWatchYouTube, hasClaude, hasGemini, jsonIn } from "./models";
 import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
+import STYLE from "@/config/style-tiktok.json";
 
 // Meilleurs passages d'une vidéo longue : 1) moments cités en commentaires, 2) Gemini regarde la vidéo par son
 // lien et propose des candidats minutés, 3) Claude (Haiku) lit leurs résumés et écrit la note, le titre, la légende et
@@ -40,13 +41,20 @@ Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 {${QUESTION_FORMAT},
 "passages": [{"start": secondes depuis le début (nombre), "end": secondes (nombre), "type": "révélation|réaction|histoire|info|réponse|débat|drôle|démo|transformation|conseil|phrase", "premiere_phrase": "la première phrase prononcée dans le passage, mot pour mot", "resume": "ce qui se passe, en une phrase"}]}`;
 
+/** Le style TikTok appris par Haiku : règles et exemples de src/config/style-tiktok.json (à nourrir de vrais posts). */
+const STYLE_TIKTOK = `Écris comme sur TikTok, pas comme sur YouTube.
+${STYLE.regles.map((r) => `- ${r}`).join("\n")}
+
+Exemples du ton attendu (inspire-toi du ton, ne recopie jamais leurs phrases) :
+${STYLE.exemples.map((e) => `- ${e.sujet} → titre « ${e.titre} », légende « ${e.legende} », ${e.hashtags.join(" ")}`).join("\n")}`;
+
 const Notes = z.object({
   notes: z.array(z.object({
     index: z.number().int(),
     scoreShorts: z.number().describe("0 à 10 : force du début, compréhension seule, densité, émotion, chute claire, durée, adapté au vertical"),
-    titre: z.string().describe("Texte affiché sur la couverture du Short : accrocheur, 8 mots maximum, sans promettre de vues"),
-    description: z.string().describe("Légende à poster sous le Short sur TikTok : 1 à 2 phrases qui donnent envie de regarder, sans hashtag"),
-    hashtags: z.array(z.string()).describe("3 à 6 hashtags pertinents, avec le #, tirés du sujet et des mots-clés de la vidéo"),
+    titre: z.string().describe("Texte de couverture façon TikTok, 2 à 6 mots"),
+    description: z.string().describe("Légende TikTok : une phrase courte, 100 caractères au plus, sans hashtag"),
+    hashtags: z.array(z.string()).describe("3 à 5 hashtags TikTok en minuscules, avec le #, #pourtoi en dernier"),
   })),
 });
 
@@ -94,7 +102,7 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
     const res = await claude(v.id).messages.parse({
       model: CLAUDE_MODEL,
       max_tokens: 10000,
-      system: "Tu prépares des Shorts à partir de passages de vidéos YouTube. Pour chacun : une note, un titre de couverture, une légende et des hashtags. Tu écris en français. Tu t'appuies uniquement sur ce qui est fourni, tu ne promets jamais de vues.",
+      system: `Tu prépares des Shorts TikTok à partir de passages de vidéos YouTube. Pour chacun : une note, un titre de couverture, une légende et des hashtags. Tu écris en français. Tu t'appuies uniquement sur ce qui est fourni, tu ne promets jamais de vues.\n\n${STYLE_TIKTOK}`,
       messages: [{ role: "user", content: `Vidéo : « ${v.title} » (${v.channelTitle}).${v.tags?.length ? `\nMots-clés YouTube : ${v.tags.join(", ")}.` : ""}${v.description ? `\nDescription YouTube (début) : ${v.description.replace(/\s+/g, " ").slice(0, 400)}` : ""}\n\nPassages candidats :\n${ok.map((c, i) =>
         `${i}. ${fmtTime(c.start)} → ${fmtTime(c.end)} (${c.end - c.start} s), ${c.type}. Début : « ${c.premiere_phrase} ». ${c.resume}${citationsIn(moments, c.start, c.end) ? ` Cité ${citationsIn(moments, c.start, c.end)} fois dans les commentaires.` : ""}`).join("\n")}\n\nPrépare chaque passage.` }],
       output_config: { format: zodOutputFormat(Notes) },

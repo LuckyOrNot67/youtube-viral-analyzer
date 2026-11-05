@@ -1,0 +1,17 @@
+{
+  "_note": "Ce que Claude Haiku apprend avant d'écrire le titre de couverture, la légende et les hashtags de chaque Short. Ce sont des suggestions, la personne les adapte. Pour améliorer le résultat, remplace ou complète les exemples par de vrais posts TikTok qui ont bien marché (copie leur texte de couverture, leur légende et leurs hashtags). Les exemples ci-dessous sont des modèles écrits à la main, pas de vrais posts.",
+  "regles": [
+    "Titre de couverture : 2 à 6 mots, écrit comme on parle, jamais comme un titre de journal ou d'article. Ce qui marche : une question, « POV : … », un chiffre, une promesse (« Personne n'a vu ce détail »), ou « (partie 1) » quand l'histoire continue. Un emoji au plus.",
+    "Légende : une seule phrase courte, 100 caractères au plus. Elle donne envie de regarder jusqu'au bout ou pose une question au public pour faire réagir en commentaire.",
+    "Jamais dans la légende : « Dans cette vidéo », « démonstration complète », le nom complet de la personne filmée, une promesse de vues.",
+    "Hashtags : 3 à 5, en minuscules, sans accent ni espace. Mets 2 ou 3 hashtags précis sur le sujet, 1 sur le format si c'est utile (#storytime, #apprendresurtiktok, #tuto, #recette) et #pourtoi en dernier. Des hashtags que les Français utilisent vraiment sur TikTok, pas des mots anglais inventés. Jamais #viral ni #fyp."
+  ],
+  "exemples": [
+    { "sujet": "Démo d'un outil d'IA qui crée une campagne marketing", "titre": "Cette IA fait ton marketing 😳", "legende": "Je lui ai juste donné l'adresse de mon site… regarde le résultat", "hashtags": ["#ia", "#marketing", "#entrepreneur", "#apprendresurtiktok", "#pourtoi"] },
+    { "sujet": "Une femme raconte que sa propriétaire l'a mise dehors", "titre": "Ma proprio m'a mise dehors (partie 1)", "legende": "Elle m'appelle un matin et me dit de partir. Vous auriez fait quoi ?", "hashtags": ["#storytime", "#histoirevraie", "#logement", "#pourtoi"] },
+    { "sujet": "Recette de gâteau rapide sans four", "titre": "Gâteau en 5 min, sans four", "legende": "3 ingrédients et c'est prêt. Tu testes ce soir ?", "hashtags": ["#recette", "#cuisinefacile", "#dessert", "#pourtoi"] },
+    { "sujet": "Action de football avec un détail que personne n'a remarqué", "titre": "Personne n'a vu ce détail 👀", "legende": "Regarde bien ses pieds à la 3e seconde", "hashtags": ["#football", "#ligue1", "#foot", "#pourtoi"] },
+    { "sujet": "Un entrepreneur explique comment il a augmenté ses revenus", "titre": "De 0 à 10 000 € par mois", "legende": "La seule chose qu'il a changée… c'est ça", "hashtags": ["#business", "#entrepreneuriat", "#argent", "#pourtoi"] },
+    { "sujet": "Un joueur s'énerve en jouant à Minecraft", "titre": "POV : ton pote rage sur Minecraft", "legende": "Il ne s'en est jamais remis 😭", "hashtags": ["#minecraft", "#gaming", "#humour", "#pourtoi"] }
+  ]
+}
