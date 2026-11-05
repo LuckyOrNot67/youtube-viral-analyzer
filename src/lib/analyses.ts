@@ -39,6 +39,7 @@ export function passagesDe(user: string, videoId: string, r: ExtraitsResult, lot
 }
 
 /** La personne a-t-elle déjà payé le découpage en histoires de cette vidéo (analyse en cours, moins de 7 jours) ? */
-export const histoiresPayees = (user: string, videoId: string, creeLe: number) => lotDe(user, `h:${videoId}`, creeLe) !== null;
+/** Découper une vidéo en histoires se paie une fois par vidéo (7 jours), quelle que soit la durée de partie choisie. */
+export const histoiresPayees = (user: string, videoId: string) => lotDe(user, `h:${videoId}`, 0) !== null;
 export const payerHistoires = (user: string, videoId: string) =>
   db().prepare("INSERT OR REPLACE INTO lots (video, user, lot, at) VALUES (?, ?, 0, ?)").run(`h:${videoId}`, user, Date.now());

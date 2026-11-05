@@ -19,7 +19,7 @@ const ABANDON_MS = LIMITES.gemini.abandonApresMinutes * 60_000;
 const g = globalThis as unknown as { __yvaRelances?: Set<string> };
 const enCours = (g.__yvaRelances ??= new Set());
 
-export function relancer(sorte: Sorte, video: Video) {
+export function relancer(sorte: Sorte, video: Video, duree = 0) {
   const cle = `${sorte}:${video.id}`;
   if (enCours.has(cle)) return;
   enCours.add(cle);
@@ -29,7 +29,7 @@ export function relancer(sorte: Sorte, video: Video) {
     if (Date.now() - debut >= SECOURS_MS) autoriserSecours(video.id, true);
     try {
       if (sorte === "shorts") await findExtraits(video);
-      else await findHistoires(video);
+      else await findHistoires(video, duree);
       fin();
       await prevenir(sorte, video, true);
     } catch (e) {

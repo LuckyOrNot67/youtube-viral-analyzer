@@ -296,7 +296,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
 }
 
 type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur"; progression: number; erreur: string | null };
-type PartieDe = { partie: number; start: number; end: number };
+type PartieDe = { partie: number; start: number; end: number; duree?: number };
 
 /** Lance le Short dès l'ouverture : plein écran, sans bandes floues ; l'image entière reste au choix. */
 function ExportShort({ videoId, start, end, titre, legende, histoire, onFin }: { videoId: string; start: number; end: number; titre: string; legende?: string | null; histoire?: PartieDe; onFin?: () => void }) {
@@ -361,8 +361,8 @@ function Legende({ texte }: { texte: string }) {
   );
 }
 
-type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[] };
-type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; format: FormatInfo; durees: number[] };
+type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[]; parties?: { n: number; start: number; end: number }[] };
+type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; format: FormatInfo; duree?: number; durees: number[] };
 
 /** Histoires en parties (Partie 1, 2, 3…) : coupées sur un moment de suspense, à la durée choisie. */
 function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
@@ -370,49 +370,58 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [load, setLoad] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [t0, setT0] = useState(0);
-  // Demandée avant de lancer : l'IA trouve les moments de suspense une fois, la durée choisie décide où couper.
-  const [duree, setDuree] = useState(LIMITES.histoires.durees[0]);
+  // Seules les durées qui donnent au moins quelques parties ; choisie avant, car l'IA coupe pour cette durée-là.
+  const possibles = LIMITES.histoires.durees.filter((d) => video.duration >= d * LIMITES.histoires.partiesMin);
+  const [duree, setDuree] = useState(possibles[0] ?? 60);
   const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
-  const run = useCallback((discret = false) => {
+  const run = useCallback((discret = false, d = duree) => {
     if (!discret) { setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(null); }
-    flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
+    flux<HistoiresRes>(`/api/video/${video.id}/histoires?duree=${d}`)
       .then((r) => { setRes(r); setSurcharge(null); })
       .catch((e) => (e instanceof Surcharge ? setSurcharge(e) : !discret && setErr(e.message)))
       .finally(() => { if (!discret) setLoad(false); });
-  }, [video.id]);
+  }, [video.id, duree]);
+  // Changer de durée après coup : nouvelle découpe par l'IA, sans être décompté une deuxième fois.
+  const changer = (d: number) => { setDuree(d); setRes(null); run(false, d); };
+  const choixDuree = (
+    <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
+      {possibles.map((d) => (
+        <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} disabled={load} onClick={() => (res ? changer(d) : setDuree(d))}>{d / 60} min</button>
+      ))}
+    </div>
+  );
+  if (!possibles.length) {
+    return <section className="story"><b className="story-t">Découper en histoires</b><p className="small">Vidéo trop courte pour une histoire en parties : il faut au moins {Math.round(LIMITES.histoires.durees[0] * LIMITES.histoires.partiesMin / 60)} minutes.</p></section>;
+  }
   return (
     <section className="col" style={{ gap: 12 }}>
       {surcharge && !load && !res && <SurchargeCarte videoId={video.id} sorte="histoires" email={surcharge.email} onRetry={run} />}
       {!res && !load && !surcharge && (
         <div className="story">
           <b className="story-t">Découper en histoires</b>
-          <p className="small">Toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l&apos;une après l&apos;autre. L&apos;IA repère où ça devient intéressant et coupe sur des fins de phrase. Chaque partie reprend les {LIMITES.histoires.recul} dernières secondes de la précédente. Combien de temps par partie ?</p>
-          <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
-            {LIMITES.histoires.durees.map((d) => (
-              <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} onClick={() => setDuree(d)}>{d / 60} min</button>
-            ))}
-          </div>
+          <p className="small">Toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l&apos;une après l&apos;autre. L&apos;IA regarde la vidéo et coupe chaque partie au moment qui donne le plus envie de voir la suite ; chaque partie reprend 2 à 3 secondes de la précédente. Combien de temps par partie ?</p>
+          {choixDuree}
           <button className="btn lime" onClick={() => run()}><BookOpen size={18} /> Découper en parties de {duree / 60} min</button>
         </div>
       )}
-      {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2></div>}
-      {load && <Waiting since={t0} label="L'IA repère où couper… (1 à 3 min)" />}
+      {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2>{choixDuree}</div>}
+      {load && <Waiting since={t0} label={`L'IA regarde la vidéo et choisit où couper (parties de ${duree / 60} min)… 1 à 3 min`} />}
       {err && <div className="notice bad" role="alert">{err}</div>}
       <ChoixFormat videoId={video.id} sorte="histoires" info={res?.format}>
         {res?.avertissement && <p className="sub">{res.avertissement}</p>}
-        {res?.histoires.map((h) => <UneHistoire key={`${h.start}-${h.end}`} videoId={video.id} h={h} durees={res.durees} depart={duree} onSeek={onSeek} />)}
+        {res?.histoires.map((h) => <UneHistoire key={`${res.duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={res.duree ?? duree} onSeek={onSeek} />)}
       </ChoixFormat>
     </section>
   );
 }
 
-function UneHistoire({ videoId, h, durees, depart, onSeek }: { videoId: string; h: Histoire; durees: number[]; depart: number; onSeek: (s: number, e?: number) => void }) {
-  const [cible, setCible] = useState(durees.includes(depart) ? depart : durees[0] ?? 60);
+function UneHistoire({ videoId, h, duree, onSeek }: { videoId: string; h: Histoire; duree: number; onSeek: (s: number, e?: number) => void }) {
   // Les parties demandées, dans l'ordre : une seule se crée à la fois, les autres attendent leur tour.
   const [file, setFile] = useState<number[]>([]);
   const [finies, setFinies] = useState<Set<number>>(new Set());
   const [vue, setVue] = useState<number | null>(null);
-  const parties = decouper(h.start, h.end, h.suspense, cible, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
+  // Les coupures choisies par l'IA ; une ancienne découpe gardée n'en a pas : on recoupe sur ses moments de suspense.
+  const parties = h.parties ?? decouper(h.start, h.end, h.suspense, duree, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
   const enCours = file.find((n) => !finies.has(n));
   const demander = (ns: number[]) => setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]);
   return (
@@ -422,16 +431,11 @@ function UneHistoire({ videoId, h, durees, depart, onSeek }: { videoId: string; 
         <b className="story-t">{h.titre}</b>
         <p className="small">{h.resume}</p>
       </div>
-      <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
-        {durees.map((d) => (
-          <button key={d} role="radio" aria-checked={d === cible} className={d === cible ? "on" : ""} onClick={() => { setCible(d); setFile([]); setFinies(new Set()); setVue(null); }}>{d / 60} min</button>
-        ))}
-      </div>
       <div className="covers row-x">
         {parties.map((p) => (
-          <div key={`${cible}-${p.n}`} className={`cover-col${finies.has(p.n) || enCours === p.n ? " wide" : ""}`}>
+          <div key={p.n} className={`cover-col${finies.has(p.n) || enCours === p.n ? " wide" : ""}`}>
             {finies.has(p.n) || enCours === p.n
-              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end }}
+              ? <ExportShort videoId={videoId} start={p.start} end={p.end} titre={h.titre} histoire={{ partie: p.n, start: h.start, end: h.end, duree }}
                   legende={legendePartie(h.titre, p.n, parties.length)}
                   onFin={() => setFinies((f) => new Set(f).add(p.n))} />
               : <>

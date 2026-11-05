@@ -21,7 +21,7 @@ const Body = z.object({
   cadrage: z.enum(["centre", "entier", "horizontal", "bandes"]).optional(),
   titre: z.string().max(300).optional(),
   /** Une partie d'histoire : le numéro de la partie et l'histoire entière (pour vérifier que la partie en fait bien partie). */
-  histoire: z.object({ partie: z.number().int().min(1), start: z.number().min(0), end: z.number().positive() }).optional(),
+  histoire: z.object({ partie: z.number().int().min(1), start: z.number().min(0), end: z.number().positive(), duree: z.number().int().positive().optional() }).optional(),
 });
 
 export async function POST(req: Request) {
@@ -62,11 +62,13 @@ export async function POST(req: Request) {
 }
 
 /** Une partie d'histoire : incluse dès que la vidéo a été découpée en histoires, sans plafond de Shorts. */
-function partieHistoire(uid: string, video: { id: string; title: string }, o: { start: number; end: number; cadrage: Cadrage; titre: string; h: { partie: number; start: number; end: number } }): string {
-  const r = cacheGet<HistoiresResult>(cleHistoires(video.id));
+function partieHistoire(uid: string, video: { id: string; title: string }, o: { start: number; end: number; cadrage: Cadrage; titre: string; h: { partie: number; start: number; end: number; duree?: number } }): string {
+  // La découpe de la durée choisie, sinon n'importe laquelle encore gardée pour cette vidéo.
+  const r = (o.h.duree ? cacheGet<HistoiresResult>(cleHistoires(video.id, o.h.duree)) : null)
+    ?? LIMITES.histoires.durees.map((d) => cacheGet<HistoiresResult>(cleHistoires(video.id, d))).find(Boolean) ?? null;
   const histoire = r?.histoires.find((x) => Math.abs(x.start - o.h.start) <= 1 && Math.abs(x.end - o.h.end) <= 1);
   // La découpe régulière de secours (sans IA) n'est pas décomptée : ses parties sont libres.
-  if (!r || !histoire || (!r.avertissement && !histoiresPayees(uid, video.id, r.creeLe))) throw new UserError("Découpe d'abord cette vidéo en histoires (ou refais-le : c'est gardé 7 jours).");
+  if (!r || !histoire || (!r.avertissement && !histoiresPayees(uid, video.id))) throw new UserError("Découpe d'abord cette vidéo en histoires (ou refais-le : c'est gardé 7 jours).");
   if (o.start < histoire.start - 1 || o.end > histoire.end + 1) throw new UserError("Cette partie sort de l'histoire.");
   const titre = `${o.titre || histoire.titre} · Partie ${o.h.partie}`;
   const { job } = startShort({ videoId: video.id, start: o.start, end: o.end, cadrage: o.cadrage, uid, titre, videoTitre: video.title, autres: [], partie: o.h.partie });

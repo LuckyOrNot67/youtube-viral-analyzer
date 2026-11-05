@@ -78,10 +78,11 @@
     "conservationJours": 7
   },
   "histoires": {
-    "_note": "Histoires = toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l'une après l'autre. L'IA trouve où la vidéo devient intéressante, où elle se termine, et les fins de phrase où couper proprement. Chaque partie reprend les `recul` dernières secondes de la précédente. Chaque heure de vidéo découpée compte pour 1 sur le compteur histoires, toutes ses parties sont incluses.",
+    "_note": "Histoires = toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l'une après l'autre. L'IA trouve où la vidéo devient intéressante, où elle se termine, et les fins de phrase où couper proprement. La durée de partie se choisit avant (une découpe par durée) ; seules les durées qui donnent au moins `partiesMin` parties sont proposées. Gemini décide chaque coupure (la durée varie autour de celle choisie) et chaque partie reprend 2 à 3 s de la précédente. Chaque heure de vidéo découpée compte pour 1 sur le compteur histoires, toutes ses parties sont incluses.",
     "dureeMin": 120,
     "partieMax": 180,
-    "recul": 5,
+    "recul": 3,
+    "partiesMin": 3,
     "durees": [
       60,
       120,

@@ -192,7 +192,7 @@ function downloadError(err: string): string {
   return "Le téléchargement du passage a échoué. Réessaie dans un instant.";
 }
 
-function ytdlp(args: string[]): Promise<{ code: number | null; err: string }> {
+export function ytdlp(args: string[]): Promise<{ code: number | null; err: string }> {
   return new Promise((resolve, reject) => {
     const p = spawn(YTDLP, args);
     let err = "";
