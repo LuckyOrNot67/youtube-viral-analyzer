@@ -2,6 +2,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { logCost } from "./events";
+import LIMITES from "@/config/limites.json";
 
 // Clés dans .env.local uniquement, jamais envoyées au navigateur.
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
@@ -34,15 +35,21 @@ export function claude(projet: string) {
 export class GeminiSurcharge extends Error {
   constructor() { super("Gemini est surchargé en ce moment."); }
 }
+/** Vidéos pour lesquelles Flash-Lite est saturé depuis trop longtemps : on passe au modèle de secours (voir relance.ts). */
+const g = globalThis as unknown as { __yvaSecours?: Set<string> };
+const secours = (g.__yvaSecours ??= new Set());
+export const autoriserSecours = (videoId: string, oui: boolean) => (oui ? secours.add(videoId) : secours.delete(videoId));
+
 /** Pauses entre deux essais quand Gemini répond « saturé ». */
 const PAUSES = [5_000, 15_000, 30_000];
 
 /** Gemini regarde une vidéo YouTube publique à partir de son lien (aucun téléchargement de notre côté).
- *  Toujours le même modèle : saturé, on attend un peu et on réessaie ; toujours saturé, GeminiSurcharge. */
+ *  Flash-Lite d'abord : saturé, on attend un peu et on réessaie ; toujours saturé, GeminiSurcharge. Le modèle de
+ *  secours, plus cher, n'est utilisé qu'après plusieurs minutes de saturation (relance.ts). */
 export async function geminiWatchYouTube(videoId: string, duree: number, prompt: string, projet: string, timeoutMs = 240_000): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const uri = `https://www.youtube.com/watch?v=${videoId}`;
-  const model = GEMINI_MODEL;
+  const model = secours.has(videoId) ? LIMITES.gemini.modeleSecours : GEMINI_MODEL;
   for (let essai = 0; ; essai++) {
     const t0 = Date.now();
     try {

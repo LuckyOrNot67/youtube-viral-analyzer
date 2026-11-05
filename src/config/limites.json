@@ -64,6 +64,12 @@
     "semaine": { "nom": "Essai 7 jours", "prix": 6.99, "recherchesParJour": 5, "videosParSemaine": 6, "shortsParVideo": 5, "histoiresParSemaine": 2, "relanceApresHeures": 24 },
     "vie": { "nom": "Pass à vie", "prix": 249, "places": 300, "commeFormule": "createur" }
   },
+  "gemini": {
+    "_note": "Gemini Flash-Lite saturé : le serveur le réessaie toutes les 2 min. Au bout de secoursApresMinutes, il passe au modèle de secours (2,5 fois plus cher, 5 fois à partir de 2027) pour que personne n'attende trop. Abandon après abandonApresMinutes.",
+    "secoursApresMinutes": 6,
+    "abandonApresMinutes": 30,
+    "modeleSecours": "gemini-3.8-flash"
+  },
   "analyse": {
     "_note": "Chaque heure de vidéo commencée compte pour 1 (1 h 30 compte pour 2, 2 h 30 pour 3). L'IA propose un grand choix de passages ; chaque groupe de 10 personnes reçoit sa propre sélection. Tout (analyse, passages téléchargés, Shorts) est gardé 7 jours, puis il faut refaire l'analyse.",
     "heuresParVideo": 1,

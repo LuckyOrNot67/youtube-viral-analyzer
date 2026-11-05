@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, Download, Flame, Loader2, Scissors, Sparkles } from "lucide-react";
 import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import { Cover } from "@/components/Cover";
@@ -33,7 +33,9 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 /** Gemini saturé : le serveur réessaie tout seul, l'écran propose d'être prévenu par email. */
-class Surcharge extends Error {}
+class Surcharge extends Error {
+  constructor(readonly email: boolean) { super("Gemini est surchargé."); }
+}
 
 /** Lit une réponse envoyée ligne par ligne (une ligne JSON par étape), jusqu'au résultat. */
 async function flux<T>(url: string, onLigne: (m: { etape?: Etape }) => void = () => {}): Promise<T> {
@@ -48,8 +50,8 @@ async function flux<T>(url: string, onLigne: (m: { etape?: Etape }) => void = ()
     const lines = buf.split("\n");
     buf = lines.pop() ?? "";
     for (const l of lines.filter(Boolean)) {
-      const m = JSON.parse(l) as { etape?: Etape; resultat?: T; error?: string; surcharge?: boolean };
-      if (m.surcharge) throw new Surcharge();
+      const m = JSON.parse(l) as { etape?: Etape; resultat?: T; error?: string; surcharge?: boolean; email?: boolean };
+      if (m.surcharge) throw new Surcharge(Boolean(m.email));
       if (m.error) throw new Error(m.error);
       if (m.resultat) return m.resultat;
       onLigne(m);
@@ -150,8 +152,10 @@ type Passage = { start: number; end: number; hook: string; titre: string; note: 
 
 type Sorte = "shorts" | "histoires";
 
-/** Gemini surchargé : on explique, on réessaie côté serveur, et la personne peut laisser son email. */
-function SurchargeCarte({ videoId, sorte, onRetry }: { videoId: string; sorte: Sorte; onRetry: () => void }) {
+/** Gemini surchargé : on explique, le serveur réessaie, l'écran vérifie seul toutes les 30 s et affiche le résultat
+ *  dès qu'il est prêt. Le champ email n'apparaît que si l'envoi d'emails est branché. */
+function SurchargeCarte({ videoId, sorte, email: avecEmail, onRetry }: { videoId: string; sorte: Sorte; email: boolean; onRetry: (discret: boolean) => void }) {
+  useEffect(() => { const t = setInterval(() => onRetry(true), 30_000); return () => clearInterval(t); }, [onRetry]);
   const [email, setEmail] = useState("");
   const [etat, setEtat] = useState<"" | "envoi" | "ok" | "pret">("");
   const [err, setErr] = useState<string | null>(null);
@@ -164,8 +168,8 @@ function SurchargeCarte({ videoId, sorte, onRetry }: { videoId: string; sorte: S
     <div className="story" role="status">
       <span className="stk pink">L&apos;IA est très demandée</span>
       <b className="story-t">Gemini est surchargé en ce moment.</b>
-      <p className="small">Ça se débloque en général en 2 à 3 minutes. On réessaie tout seul toutes les 2 minutes : rien n&apos;est décompté de ta formule tant que ce n&apos;est pas prêt.</p>
-      {etat === "ok" ? <div className="notice">C&apos;est noté : on t&apos;écrit à {email} dès que c&apos;est prêt.</div>
+      <p className="small">Ça se débloque en général en 2 à 3 minutes. On réessaie tout seul, et au plus tard dans 6 minutes on passe sur une IA plus puissante. Reste sur cette page : le résultat s&apos;affiche dès qu&apos;il est prêt. Rien n&apos;est décompté de ta formule avant.</p>
+      {!avecEmail ? null : etat === "ok" ? <div className="notice">C&apos;est noté : on t&apos;écrit à {email} dès que c&apos;est prêt.</div>
         : etat === "pret" ? <div className="notice">C&apos;est déjà prêt : clique sur « Réessayer ».</div>
         : (
           <form className="row" style={{ gap: 8, flexWrap: "wrap" }} onSubmit={envoyer}>
@@ -174,7 +178,7 @@ function SurchargeCarte({ videoId, sorte, onRetry }: { videoId: string; sorte: S
           </form>
         )}
       {err && <div className="notice bad" role="alert">{err}</div>}
-      <button className="btn ghost sm" onClick={onRetry}>Réessayer maintenant</button>
+      <span className="row small" style={{ gap: 8 }}><Loader2 size={14} className="spin" /> On vérifie toutes les 30 secondes…</span>
     </div>
   );
 }
@@ -221,18 +225,19 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   const [vu, setVu] = useState<number | null>(null);
   const [t0, setT0] = useState(0);
   const [etape, setEtape] = useState<Etape | null>(null);
-  const [surcharge, setSurcharge] = useState(false);
+  const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
 
-  const run = async () => {
-    setState("load"); setErr(null); setT0(Date.now()); setEtape(null); setSurcharge(false);
+  // `discret` : vérification en arrière-plan pendant que Gemini est surchargé, sans repasser par l'écran d'attente.
+  const run = useCallback(async (discret = false) => {
+    if (!discret) { setState("load"); setErr(null); setT0(Date.now()); setEtape(null); setSurcharge(null); }
     try {
       const r = await flux<ExtraitsRes>(`/api/video/${video.id}/extraits`, (m) => { if (m.etape) { setEtape(m.etape); setT0(Date.now()); } });
-      setRes(r); setState("done");
+      setRes(r); setSurcharge(null); setState("done");
     } catch (e) {
-      if (e instanceof Surcharge) setSurcharge(true); else setErr((e as Error).message);
-      setState("idle");
+      if (e instanceof Surcharge) setSurcharge(e); else if (!discret) setErr((e as Error).message);
+      if (!discret) setState("idle");
     }
-  };
+  }, [video.id]);
 
   // Les passages de l'IA, sinon les moments cités dans les commentaires (45 s autour).
   const passages: Passage[] = res
@@ -243,8 +248,8 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
 
   return (
     <section className="col" style={{ gap: 12 }}>
-      {surcharge && state === "idle" && <SurchargeCarte videoId={video.id} sorte="shorts" onRetry={run} />}
-      {state === "idle" && !surcharge && <button className="btn lime arrowed big" onClick={run}><span className="row" style={{ gap: 10 }}><Sparkles size={20} /> Trouver les Shorts</span><span className="arrow"><Scissors size={17} /></span></button>}
+      {surcharge && state === "idle" && <SurchargeCarte videoId={video.id} sorte="shorts" email={surcharge.email} onRetry={run} />}
+      {state === "idle" && !surcharge && <button className="btn lime arrowed big" onClick={() => run()}><span className="row" style={{ gap: 10 }}><Sparkles size={20} /> Trouver les Shorts</span><span className="arrow"><Scissors size={17} /></span></button>}
       {state === "load" && (
         <ol className="col small" style={{ gap: 6, listStyle: "none", padding: 0, margin: 0 }} aria-live="polite">
           {ETAPES.map((e, i) => {
@@ -343,15 +348,17 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [t0, setT0] = useState(0);
   // Demandée avant de lancer : l'IA trouve les moments de suspense une fois, la durée choisie décide où couper.
   const [duree, setDuree] = useState(LIMITES.histoires.durees[0]);
-  const [surcharge, setSurcharge] = useState(false);
-  const run = () => {
-    setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(false);
+  const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
+  const run = useCallback((discret = false) => {
+    if (!discret) { setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(null); }
     flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
-      .then(setRes).catch((e) => (e instanceof Surcharge ? setSurcharge(true) : setErr(e.message))).finally(() => setLoad(false));
-  };
+      .then((r) => { setRes(r); setSurcharge(null); })
+      .catch((e) => (e instanceof Surcharge ? setSurcharge(e) : !discret && setErr(e.message)))
+      .finally(() => { if (!discret) setLoad(false); });
+  }, [video.id]);
   return (
     <section className="col" style={{ gap: 12 }}>
-      {surcharge && !load && <SurchargeCarte videoId={video.id} sorte="histoires" onRetry={run} />}
+      {surcharge && !load && !res && <SurchargeCarte videoId={video.id} sorte="histoires" email={surcharge.email} onRetry={run} />}
       {!res && !load && !surcharge && (
         <div className="story">
           <b className="story-t">Découper en histoires</b>
@@ -361,7 +368,7 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
               <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} onClick={() => setDuree(d)}>{d / 60} min</button>
             ))}
           </div>
-          <button className="btn lime" onClick={run}><BookOpen size={18} /> Découper en parties de {duree / 60} min</button>
+          <button className="btn lime" onClick={() => run()}><BookOpen size={18} /> Découper en parties de {duree / 60} min</button>
         </div>
       )}
       {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2></div>}

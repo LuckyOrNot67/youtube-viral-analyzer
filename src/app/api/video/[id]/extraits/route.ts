@@ -5,7 +5,8 @@ import { assertUsage, countUsage, formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
 import { formatPour } from "@/lib/format";
 import { GeminiSurcharge } from "@/lib/ai/models";
-import { relancer } from "@/lib/relance";
+import { relancer, relanceEnCours } from "@/lib/relance";
+import { emailPret } from "@/lib/email";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -33,6 +34,12 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
         const send = (o: unknown) => { if (ouvert) try { ctl.enqueue(enc.encode(JSON.stringify(o) + "\n")); } catch { ouvert = false; } };
         // Une ligne toutes les 15 s pendant que l'IA regarde : le lien public ne coupe pas une réponse qui parle.
         const pouls = setInterval(() => send({ attente: true }), 15_000);
+        // Le serveur réessaie déjà en arrière-plan : on ne relance pas Gemini une deuxième fois, l'écran attend.
+        if (relanceEnCours("shorts", id) && !analyseDe(id)) {
+          clearInterval(pouls); send({ surcharge: true, email: emailPret() });
+          if (ouvert) try { ctl.close(); } catch {}
+          return;
+        }
         try {
           const r = await findExtraits(video, (etape) => send({ etape }));
           let extraits = r.extraits;
@@ -48,7 +55,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
           send({ resultat: { ...r, extraits, format: formatPour(uid, id, "shorts"), formule: { nom, shortsParVideo }, expireLe: r.creeLe + LIMITES.analyse.conservationJours * 86400_000 } });
         } catch (e) {
           // Gemini saturé : rien n'est compté, le serveur réessaie tout seul toutes les 2 minutes.
-          if (e instanceof GeminiSurcharge) { relancer("shorts", video); send({ surcharge: true }); }
+          if (e instanceof GeminiSurcharge) { relancer("shorts", video); send({ surcharge: true, email: emailPret() }); }
           else send({ error: (await fail(e).json()).error });
         } finally {
           clearInterval(pouls);

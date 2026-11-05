@@ -1,18 +1,21 @@
 import "server-only";
 import { findExtraits } from "./ai/extraits";
 import { findHistoires } from "./ai/histoires";
-import { GeminiSurcharge } from "./ai/models";
+import { autoriserSecours, GeminiSurcharge } from "./ai/models";
 import { db } from "./db";
 import { envoyerEmail } from "./email";
 import type { Sorte } from "./format";
 import type { Video } from "./types";
+import LIMITES from "@/config/limites.json";
 
-// Gemini surchargé : le serveur réessaie tout seul toutes les 2 minutes (pendant 30 min au plus). Dès que l'analyse
-// est prête, elle est gardée pour tout le monde et les personnes qui ont laissé leur email sont prévenues.
+// Gemini surchargé : le serveur réessaie tout seul toutes les 2 minutes. Au bout de quelques minutes, il passe au
+// modèle de secours, plus cher, pour que personne n'attende trop. Dès que l'analyse est prête, elle est gardée pour
+// tout le monde (l'écran qui attend la récupère seul) et les personnes qui ont laissé leur email sont prévenues.
 // Leur email est effacé juste après l'envoi.
 
 const INTERVALLE = 2 * 60_000;
-const ESSAIS = 15;
+const SECOURS_MS = LIMITES.gemini.secoursApresMinutes * 60_000;
+const ABANDON_MS = LIMITES.gemini.abandonApresMinutes * 60_000;
 const g = globalThis as unknown as { __yvaRelances?: Set<string> };
 const enCours = (g.__yvaRelances ??= new Set());
 
@@ -20,17 +23,18 @@ export function relancer(sorte: Sorte, video: Video) {
   const cle = `${sorte}:${video.id}`;
   if (enCours.has(cle)) return;
   enCours.add(cle);
-  let n = 0;
+  const debut = Date.now();
+  const fin = () => { enCours.delete(cle); autoriserSecours(video.id, false); };
   const essai = async () => {
-    n++;
+    if (Date.now() - debut >= SECOURS_MS) autoriserSecours(video.id, true);
     try {
       if (sorte === "shorts") await findExtraits(video);
       else await findHistoires(video);
-      enCours.delete(cle);
+      fin();
       await prevenir(sorte, video, true);
     } catch (e) {
-      if (e instanceof GeminiSurcharge && n < ESSAIS) { setTimeout(essai, INTERVALLE); return; }
-      enCours.delete(cle);
+      if (e instanceof GeminiSurcharge && Date.now() - debut < ABANDON_MS) { setTimeout(essai, INTERVALLE); return; }
+      fin();
       console.warn(`[relance] ${cle} abandonnée :`, (e as Error).message);
       await prevenir(sorte, video, false);
     }

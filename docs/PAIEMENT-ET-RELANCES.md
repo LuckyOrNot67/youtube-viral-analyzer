@@ -33,7 +33,8 @@ Décisions de Lucas du 5 novembre 2026. Les chiffres viennent de la propale (mar
 
 ## Gemini surchargé (déjà en place)
 
-- L'app ne bascule plus jamais sur un modèle Gemini plus cher. Elle réessaie Flash-Lite après 5, 15 et 30 s.
-- Si Gemini reste saturé, l'écran affiche « Gemini est surchargé, ça se débloque en général en 2 à 3 minutes », avec un champ « Préviens-moi » pour laisser son email.
-- Le serveur réessaie tout seul toutes les 2 minutes, pendant 30 minutes au plus. Dès que c'est prêt, il envoie l'email puis efface l'adresse. Rien n'est décompté de la formule tant que la personne n'a pas rouvert son résultat.
-- Les emails partent par Resend. Il faut `RESEND_API_KEY` et `EMAIL_FROM` dans `.env.local`, avec une adresse sur un domaine vérifié chez Resend. Sans ces clés, rien ne part : l'email est seulement écrit dans le journal du serveur.
+- L'app réessaie d'abord Gemini Flash-Lite après 5, 15 et 30 s.
+- Si Gemini reste saturé, l'écran affiche « Gemini est surchargé, ça se débloque en général en 2 à 3 minutes ». La page vérifie seule toutes les 30 s et affiche le résultat dès qu'il est prêt.
+- Le serveur réessaie toutes les 2 minutes. Après 6 minutes de saturation, il passe au modèle de secours, plus cher (`gemini.modeleSecours`), pour que personne n'attende trop. Il abandonne après 30 minutes. Ces réglages sont dans `src/config/limites.json`.
+- Rien n'est décompté de la formule tant que la personne n'a pas reçu son résultat.
+- Emails « c'est prêt » : le code est prêt, mais il reste à brancher. Il faut `RESEND_API_KEY` et `EMAIL_FROM` dans `.env.local`. Tant qu'ils manquent, le champ email ne s'affiche pas.

@@ -6,7 +6,8 @@ import { assertUsage, countUsage, formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
 import { formatPour } from "@/lib/format";
 import { GeminiSurcharge } from "@/lib/ai/models";
-import { relancer } from "@/lib/relance";
+import { relancer, relanceEnCours } from "@/lib/relance";
+import { emailPret } from "@/lib/email";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
@@ -33,6 +34,12 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
         let ouvert = true;
         const send = (o: unknown) => { if (ouvert) try { ctl.enqueue(enc.encode(JSON.stringify(o) + "\n")); } catch { ouvert = false; } };
         const pouls = setInterval(() => send({ attente: true }), 15_000);
+        // Le serveur réessaie déjà en arrière-plan : on ne relance pas Gemini une deuxième fois, l'écran attend.
+        if (relanceEnCours("histoires", id) && !cacheGet<HistoiresResult>(`histoires:${id}`)) {
+          clearInterval(pouls); send({ surcharge: true, email: emailPret() });
+          if (ouvert) try { ctl.close(); } catch {}
+          return;
+        }
         try {
           const r = await findHistoires(video);
           // On ne fait payer que si l'IA a trouvé au moins une histoire.
@@ -42,7 +49,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
           }
           send({ resultat: { ...r, format: formatPour(uid, id, "histoires"), durees: LIMITES.histoires.durees, formule: { nom: formule().nom } } });
         } catch (e) {
-          if (e instanceof GeminiSurcharge) { relancer("histoires", video); send({ surcharge: true }); }
+          if (e instanceof GeminiSurcharge) { relancer("histoires", video); send({ surcharge: true, email: emailPret() }); }
           else send({ error: (await fail(e).json()).error });
         } finally {
           clearInterval(pouls);
