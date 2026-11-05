@@ -12,6 +12,7 @@ import { conseilDe } from "./format";
 import { planParPlan } from "./ai/montage-ia";
 import { filtreMontage, morceaux } from "./montage";
 import type { Phrase } from "./sous-titres";
+import { visagesDe } from "./visages";
 import LIMITES from "@/config/limites.json";
 
 // Export d'un Short vertical à partir d'un passage d'une vidéo YouTube : yt-dlp télécharge seulement les passages
@@ -107,11 +108,12 @@ export function startShort(o: { videoId: string; start: number; end: number; cad
  *  avec des bandes noires en haut et en bas (1080×1920) ; « horizontal » garde l'image entière en 1920×1080
  *  (TikTok ajoute des bandes noires), « entier » (ancien) la pose sur un fond flou. */
 export function verticalFilter(c: Cadrage, centreX = 0.5): string {
-  // Le cadre suit les personnes : `centreX` (0 à gauche, 1 à droite) place la découpe dans la largeur de l'image.
+  // Le cadre suit les personnes : `centreX` (0 à gauche, 1 à droite) est le milieu de la découpe, sans sortir de l'image.
   const x = Math.min(1, Math.max(0, centreX)).toFixed(2);
-  if (c === "bandes") return `[0:v]crop=w=min(iw\\,ih*3/4):h=min(ih\\,iw*4/3):x=(iw-ow)*${x},scale=1080:1440,pad=1080:1920:0:240:black,setsar=1,fps=30[vout]`;
+  const cx = `max(0\\,min(iw-ow\\,${x}*iw-ow/2))`;
+  if (c === "bandes") return `[0:v]crop=w=min(iw\\,ih*3/4):h=min(ih\\,iw*4/3):x=${cx},scale=1080:1440,pad=1080:1920:0:240:black,setsar=1,fps=30[vout]`;
   if (c === "horizontal") return "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30[vout]";
-  if (c === "centre") return `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-ow)*${x}:0,setsar=1,fps=30[vout]`;
+  if (c === "centre") return `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:${cx}:0,setsar=1,fps=30[vout]`;
   return "[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2,eq=brightness=-0.08[bg];"
     + "[b]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,fps=30[vout]";
 }
@@ -180,16 +182,17 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
   const centreX = conseilDe(job.videoId)?.centreX;
   let filtre = verticalFilter(job.cadrage === "auto" ? "bandes" : job.cadrage, centreX);
   if (job.cadrage === "auto" && montage) {
-    // Montage auto : Gemini regarde le passage et dit qui suivre ; ses changements sont recalés sur les vrais
-    // changements de plan. S'il ne répond pas, le Short sort quand même, avec les bandes.
+    // Montage auto : Gemini regarde le passage et dit qui suivre, le détecteur trouve les visages, FFmpeg les changements
+    // de plan. Si Gemini ne répond pas, le cadre suit quand même les visages.
     const phrases = (await montage().catch(() => [] as Phrase[]))
       .filter((p) => p.end > job.start && p.start < job.end).map((p) => ({ ...p, start: p.start - job.start, end: p.end - job.start }));
-    const [plans, coupes] = await Promise.all([
+    const [plans, coupes, visages] = await Promise.all([
       planParPlan(job.videoId, job.start, job.end, input, offset, phrases).catch((e) => { console.warn("[short] montage auto :", (e as Error).message); return []; }),
-      sceneCuts(input),
+      sceneCuts(input, 0.15),
+      visagesDe(input, offset, len).catch((e) => { console.warn("[short]", (e as Error).message); return []; }),
     ]);
-    const ms = morceaux(plans, 0, len, coupes.map((c) => c - offset).filter((c) => c > 0 && c < len), phrases.map((p) => p.start), centreX);
-    console.info(`[short] ${job.videoId} montage auto : ${plans.length} changements notés, ${ms.length} morceaux (${ms.map((m) => `${m.a}:${m.mode}`).join(" ")})`);
+    const ms = morceaux(plans, len, coupes.map((c) => c - offset).filter((c) => c > 0 && c < len), phrases.map((p) => p.start), visages);
+    console.info(`[short] ${job.videoId} montage auto : ${plans.length} notes de Gemini, ${coupes.length} plans, ${ms.length} morceaux (${ms.map((m) => `${m.a}:${m.mode}`).join(" ")})`);
     filtre = filtreMontage(ms);
   }
   await ffmpeg([
