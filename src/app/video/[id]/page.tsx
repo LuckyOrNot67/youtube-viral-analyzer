@@ -361,8 +361,9 @@ function Legende({ texte }: { texte: string }) {
   );
 }
 
-type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[]; parties?: { n: number; start: number; end: number }[] };
-type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; format: FormatInfo; duree?: number; durees: number[] };
+type PartieH = { n: number; start: number; end: number };
+type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[]; parties?: PartieH[]; decoupes?: Record<string, PartieH[]> };
+type HistoiresRes = { histoires: Histoire[]; avertissement: string | null; format: FormatInfo; durees: number[] };
 
 /** Histoires en parties (Partie 1, 2, 3…) : coupées sur un moment de suspense, à la durée choisie. */
 function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e?: number) => void }) {
@@ -370,23 +371,22 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [load, setLoad] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [t0, setT0] = useState(0);
-  // Seules les durées qui donnent au moins quelques parties ; choisie avant, car l'IA coupe pour cette durée-là.
+  // Seules les durées qui donnent au moins quelques parties. L'IA prépare les découpes de toutes ces durées d'un coup :
+  // changer de durée ensuite est immédiat et gratuit.
   const possibles = LIMITES.histoires.durees.filter((d) => video.duration >= d * LIMITES.histoires.partiesMin);
   const [duree, setDuree] = useState(possibles[0] ?? 60);
   const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
-  const run = useCallback((discret = false, d = duree) => {
+  const run = useCallback((discret = false) => {
     if (!discret) { setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(null); }
-    flux<HistoiresRes>(`/api/video/${video.id}/histoires?duree=${d}`)
+    flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
       .then((r) => { setRes(r); setSurcharge(null); })
       .catch((e) => (e instanceof Surcharge ? setSurcharge(e) : !discret && setErr(e.message)))
       .finally(() => { if (!discret) setLoad(false); });
-  }, [video.id, duree]);
-  // Changer de durée après coup : nouvelle découpe par l'IA, sans être décompté une deuxième fois.
-  const changer = (d: number) => { setDuree(d); setRes(null); run(false, d); };
+  }, [video.id]);
   const choixDuree = (
     <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
       {possibles.map((d) => (
-        <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} disabled={load} onClick={() => (res ? changer(d) : setDuree(d))}>{d / 60} min</button>
+        <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} disabled={load} onClick={() => setDuree(d)}>{d / 60} min</button>
       ))}
     </div>
   );
@@ -399,17 +399,17 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
       {!res && !load && !surcharge && (
         <div className="story">
           <b className="story-t">Découper en histoires</b>
-          <p className="small">Toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l&apos;une après l&apos;autre. L&apos;IA regarde la vidéo et coupe chaque partie au moment qui donne le plus envie de voir la suite ; chaque partie reprend 2 à 3 secondes de la précédente. Combien de temps par partie ?</p>
+          <p className="small">Toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l&apos;une après l&apos;autre. L&apos;IA regarde la vidéo et note où couper pour que chaque partie donne envie de voir la suite ; chaque partie reprend 2 à 3 secondes de la précédente. Tu pourras changer de durée ensuite, sans attendre. Combien de temps par partie ?</p>
           {choixDuree}
           <button className="btn lime" onClick={() => run()}><BookOpen size={18} /> Découper en parties de {duree / 60} min</button>
         </div>
       )}
       {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2>{choixDuree}</div>}
-      {load && <Waiting since={t0} label={`L'IA regarde la vidéo et choisit où couper (parties de ${duree / 60} min)… 1 à 3 min`} />}
+      {load && <Waiting since={t0} label="L'IA regarde la vidéo et note où couper… 1 à 3 min" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
       <ChoixFormat videoId={video.id} sorte="histoires" info={res?.format}>
         {res?.avertissement && <p className="sub">{res.avertissement}</p>}
-        {res?.histoires.map((h) => <UneHistoire key={`${res.duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={res.duree ?? duree} onSeek={onSeek} />)}
+        {res?.histoires.map((h) => <UneHistoire key={`${duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={duree} onSeek={onSeek} />)}
       </ChoixFormat>
     </section>
   );
@@ -420,8 +420,8 @@ function UneHistoire({ videoId, h, duree, onSeek }: { videoId: string; h: Histoi
   const [file, setFile] = useState<number[]>([]);
   const [finies, setFinies] = useState<Set<number>>(new Set());
   const [vue, setVue] = useState<number | null>(null);
-  // Les coupures choisies par l'IA ; une ancienne découpe gardée n'en a pas : on recoupe sur ses moments de suspense.
-  const parties = h.parties ?? decouper(h.start, h.end, h.suspense, duree, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
+  // Les coupures notées par l'IA pour cette durée ; sinon on recoupe chez nous sur ses moments de suspense.
+  const parties = h.decoupes?.[String(duree)] ?? h.parties ?? decouper(h.start, h.end, h.suspense, duree, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
   const enCours = file.find((n) => !finies.has(n));
   const demander = (ns: number[]) => setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]);
   return (

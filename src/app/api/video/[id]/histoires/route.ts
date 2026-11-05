@@ -13,9 +13,9 @@ import LIMITES from "@/config/limites.json";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-/** La vidéo découpée en parties qui se suivent, pour la durée de partie choisie (?duree=60, 120 ou 180). Compte 1 sur le
- *  compteur histoires par vidéo, quelle que soit la durée ; rouvrir ou changer de durée ensuite est gratuit. */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+/** La vidéo découpée en parties qui se suivent, pour toutes les durées de partie possibles d'un coup. Compte 1 sur le
+ *  compteur histoires par vidéo ; rouvrir ou changer de durée ensuite est immédiat et gratuit. */
+export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     if (!VIDEO_ID.test(id)) throw new UserError("Identifiant de vidéo invalide.");
@@ -24,8 +24,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (video.s.isShort) throw new UserError("C'est déjà un Short : le découpage en histoires sert aux vidéos longues.");
     const possibles = dureesPour(video.duration);
     if (!possibles.length) throw new UserError(`Vidéo trop courte pour une histoire en parties : il faut au moins ${Math.round(LIMITES.histoires.durees[0] * LIMITES.histoires.partiesMin / 60)} minutes.`);
-    const demandee = Number(new URL(req.url).searchParams.get("duree"));
-    const duree = possibles.includes(demandee) ? demandee : possibles[0];
     const paye = histoiresPayees(uid, id);
     const cout = coutVideo(video.duration);
     if (!paye) assertUsage(uid, "histoires", cout);
@@ -39,21 +37,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         const send = (o: unknown) => { if (ouvert) try { ctl.enqueue(enc.encode(JSON.stringify(o) + "\n")); } catch { ouvert = false; } };
         const pouls = setInterval(() => send({ attente: true }), 15_000);
         // Le serveur réessaie déjà en arrière-plan : on ne relance pas Gemini une deuxième fois, l'écran attend.
-        if (relanceEnCours("histoires", id) && !cacheGet<HistoiresResult>(cleHistoires(id, duree))) {
+        if (relanceEnCours("histoires", id) && !cacheGet<HistoiresResult>(cleHistoires(id))) {
           clearInterval(pouls); send({ surcharge: true, email: emailPret() });
           if (ouvert) try { ctl.close(); } catch {}
           return;
         }
         try {
-          const r = await findHistoires(video, duree);
+          const r = await findHistoires(video);
           // On ne fait payer que la découpe faite par l'IA (pas la découpe régulière de secours).
           if (!histoiresPayees(uid, id) && !r.avertissement) {
             payerHistoires(uid, id);
             countUsage(uid, "histoires", cout);
           }
-          send({ resultat: { ...r, format: formatPour(uid, id, "histoires"), duree, durees: possibles, formule: { nom: formule().nom } } });
+          send({ resultat: { ...r, format: formatPour(uid, id, "histoires"), durees: r.durees ?? possibles, formule: { nom: formule().nom } } });
         } catch (e) {
-          if (e instanceof GeminiSurcharge) { relancer("histoires", video, duree); send({ surcharge: true, email: emailPret() }); }
+          if (e instanceof GeminiSurcharge) { relancer("histoires", video); send({ surcharge: true, email: emailPret() }); }
           else send({ error: (await fail(e).json()).error });
         } finally {
           clearInterval(pouls);

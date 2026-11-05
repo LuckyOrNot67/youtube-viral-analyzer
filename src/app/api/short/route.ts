@@ -64,8 +64,7 @@ export async function POST(req: Request) {
 /** Une partie d'histoire : incluse dès que la vidéo a été découpée en histoires, sans plafond de Shorts. */
 function partieHistoire(uid: string, video: { id: string; title: string }, o: { start: number; end: number; cadrage: Cadrage; titre: string; h: { partie: number; start: number; end: number; duree?: number } }): string {
   // La découpe de la durée choisie, sinon n'importe laquelle encore gardée pour cette vidéo.
-  const r = (o.h.duree ? cacheGet<HistoiresResult>(cleHistoires(video.id, o.h.duree)) : null)
-    ?? LIMITES.histoires.durees.map((d) => cacheGet<HistoiresResult>(cleHistoires(video.id, d))).find(Boolean) ?? null;
+  const r = cacheGet<HistoiresResult>(cleHistoires(video.id));
   const histoire = r?.histoires.find((x) => Math.abs(x.start - o.h.start) <= 1 && Math.abs(x.end - o.h.end) <= 1);
   // La découpe régulière de secours (sans IA) n'est pas décomptée : ses parties sont libres.
   if (!r || !histoire || (!r.avertissement && !histoiresPayees(uid, video.id))) throw new UserError("Découpe d'abord cette vidéo en histoires (ou refais-le : c'est gardé 7 jours).");
