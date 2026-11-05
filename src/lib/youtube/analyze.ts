@@ -27,6 +27,25 @@ async function channelVideos(ch: Channel, n: number): Promise<{ videos: Video[];
   return { videos: value, hit };
 }
 
+/** Il faut au moins ça de vidéos du même format (Shorts ou longues) pour bien comparer. */
+const COMPARAISON_MIN = 12;
+const BASE_MAX = 200;
+
+/** Les vidéos de la chaîne qui servent de point de comparaison : les 50 dernières. Si la chaîne mélange les formats
+ *  et que l'un d'eux y est trop rare (Squeezie : 46 Shorts pour 4 longues), on remonte jusqu'à 200 vidéos. */
+async function baseDe(ch: Channel): Promise<Video[]> {
+  const { value } = await cached(`base2:${ch.id}`, 24, async () => {
+    const ids = await uploadIds(ch.uploads, BASE_N);
+    const vs = await videosByIds(ids);
+    const shorts = vs.filter((v) => v.duration > 0 && v.duration <= SHORT_MAX).length, longues = vs.length - shorts;
+    const rare = (n: number) => n > 0 && n < COMPARAISON_MIN;
+    if (ids.length < BASE_N || (!rare(shorts) && !rare(longues))) return vs;
+    const plus = (await uploadIds(ch.uploads, BASE_MAX)).filter((id) => !ids.includes(id));
+    return [...vs, ...(await videosByIds(plus))];
+  });
+  return value;
+}
+
 function scoreAll(videos: Video[], pools: Map<string, Video[]>, subs: Map<string, number | null>): ScoredVideo[] {
   const now = Date.now();
   const snaps = snapshotsOf(videos.map((v) => v.id));
@@ -128,13 +147,12 @@ export async function analyzeTopic(q: string, f: SearchFilters): Promise<SearchR
     ? `Aucune vidéo en français ne parle de « ${mots.join(" ")} » sur cette période. Essaie une période plus longue ou d'autres mots.`
     : `Aucune vidéo ne parle de « ${mots.join(" ")} » avec ces filtres.`, 404);
 
-  // Chaque vidéo est comparée aux 50 dernières vidéos de SA chaîne (mise en cache 24 h, partagée entre recherches).
+  // Chaque vidéo est comparée aux dernières vidéos de SA chaîne (voir baseDe, mises en cache 24 h, partagées entre recherches).
   const pools = new Map<string, Video[]>();
   // Par groupes de 10 chaînes en parallèle : ~3 s au lieu de ~25 s pour 50 chaînes, sans rafale d'appels.
   for (let i = 0; i < found.chans.length; i += 10) {
     await Promise.all(found.chans.slice(i, i + 10).map(async (ch) => {
-      const { value } = await cached(`base:${ch.id}`, 24, async () => videosByIds(await uploadIds(ch.uploads, BASE_N)));
-      pools.set(ch.id, value);
+      pools.set(ch.id, await baseDe(ch));
     }));
   }
   const scored = scoreAll(kept, pools, new Map(found.chans.map((c) => [c.id, c.subs])));
@@ -154,7 +172,7 @@ export async function videoDetail(id: string): Promise<VideoDetail> {
   const v = vs[0];
   if (!v) throw new YouTubeError("Cette vidéo n'existe pas, est privée ou a été supprimée.", 404);
   const ch = await resolveChannel({ kind: "channelId", id: v.channelId });
-  const { value: base } = await cached(`base:${ch.id}`, 24, async () => videosByIds(await uploadIds(ch.uploads, BASE_N)));
+  const base = await baseDe(ch);
   const pool = base.some((b) => b.id === v.id) ? base.map((b) => (b.id === v.id ? v : b)) : [...base, v];
   const scored = scoreAll(pool, new Map([[ch.id, pool]]), new Map([[ch.id, ch.subs]]));
   const me = scored.find((s) => s.id === v.id)!;

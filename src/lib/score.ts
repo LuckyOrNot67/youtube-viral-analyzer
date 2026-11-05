@@ -96,7 +96,9 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
     const ageComp = median(comp.map((p) => ageDays(p, now))) ?? age;
     const tropJeune = ageComp > 2 * age;
     const pts = tropJeune ? Math.max(0, pointsHabitude(ratio)) : pointsHabitude(ratio);
-    points.push({ critere: "Par rapport à d'habitude", points: pts, detail: `${pct(ratio)} par rapport aux ${fmtNum(base)} vues habituelles de la chaîne${tropJeune && pts === 0 ? " (vidéo encore jeune, pas de malus)" : ""}` });
+    const format = isShort(v) ? "Shorts" : "vidéos longues";
+    const sur = comp.length < 5 ? `, seulement ${comp.length} ${format} de la chaîne pour comparer` : `, comparée à ${comp.length} ${format} de la chaîne`;
+    points.push({ critere: "Par rapport à d'habitude", points: pts, detail: `${pct(ratio)} par rapport aux ${fmtNum(base)} vues habituelles${sur}${tropJeune && pts === 0 ? " (vidéo encore jeune, pas de malus)" : ""}` });
   } else points.push({ critere: "Par rapport à d'habitude", points: 0, detail: "pas assez de vidéos sur la chaîne pour comparer" });
 
   // 3. Likes et commentaires par vue, comparés à la chaîne (lissés, pour ne pas récompenser trois likes).

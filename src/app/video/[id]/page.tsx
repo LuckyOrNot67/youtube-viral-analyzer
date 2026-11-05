@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, Download, Flame, Loader2, Scissors, Sparkles } from "lucide-react";
-import { Conf, fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
+import { fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import { Cover } from "@/components/Cover";
 import type { Channel, Extrait, MomentCite, ScoredVideo } from "@/lib/types";
 import { decouper } from "@/lib/decoupe";
@@ -107,7 +107,6 @@ export default function VideoPage() {
         <div className="card col" style={{ gap: 10, marginTop: 8 }}>
           {(s.points ?? []).map((p) => <Crit key={p.critere} label={p.critere} detail={p.detail} pts={p.points} />)}
           <div className="crit total"><span>Total</span><span className="dim">{s.totalPoints !== undefined ? `${fmtScore(s.totalPoints)} points, ramenés à une note sur 10` : ""}</span><span className="p">{fmtScore(s.score)}/10</span></div>
-          <p className="small"><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
         </div>
       </details>
 
