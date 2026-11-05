@@ -12,7 +12,7 @@ import LIMITES from "@/config/limites.json";
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = MomentCite;
-type Format = "vertical" | "horizontal";
+type Format = "vertical" | "bandes" | "horizontal";
 /** L'avis de l'IA sur le format (gardé pour tout le monde) et le choix de la personne, pour les Shorts ou pour les histoires. */
 type FormatInfo = { conseil: { format: Format; raison: string } | null; choix: Format | null };
 type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; format: FormatInfo; formule: { nom: string; shortsParVideo: number }; expireLe: number };
@@ -187,29 +187,36 @@ function ChoixFormat({ videoId, sorte, info, children }: { videoId: string; sort
   const [choix, setChoix] = useState<Format | null>(null);
   const [envoi, setEnvoi] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  if (info?.conseil?.format !== "horizontal" || choix || info.choix) return <>{children}</>;
+  if (!info?.conseil || info.conseil.format === "vertical" || choix || info.choix) return <>{children}</>;
+  const reco = info.conseil.format;
   const choisir = (format: Format) => {
     setEnvoi(true); setErr(null);
     api<{ choix: Format }>(`/api/video/${videoId}/format`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sorte, format }) })
       .then((r) => setChoix(r.choix)).catch((e) => setErr(e.message)).finally(() => setEnvoi(false));
   };
   const img = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+  const options: { f: Format; nom: string; dit: string }[] = [
+    { f: "bandes", nom: "Avec bandes", dit: "Le milieu, plus large" },
+    { f: "horizontal", nom: "Image entière", dit: "Rien n'est coupé" },
+    { f: "vertical", nom: "Plein écran", dit: "Les côtés sont coupés" },
+  ].map((o) => ({ ...o, f: o.f as Format }));
   return (
     <div className="choix-format">
       <div className="cf-txt">
         <span className="stk pink">{sorte === "shorts" ? "Avant tes Shorts" : "Avant tes histoires"}</span>
-        <b className="h h-m">Cette vidéo rend mieux <span className="it acc">en horizontal.</span></b>
-        <p className="sub">{info.conseil.raison} En vertical, on couperait l&apos;essentiel. En horizontal, TikTok ajoute simplement des bandes noires en haut et en bas.</p>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <button className="btn lime" disabled={envoi} onClick={() => choisir("horizontal")}>Garder l&apos;horizontal</button>
-          <button className="btn ghost" disabled={envoi} onClick={() => choisir("vertical")}>Vertical quand même</button>
-        </div>
+        <b className="h h-m">Cette vidéo est <span className="it acc">large.</span> Comment la cadrer ?</b>
+        <p className="sub">{info.conseil.raison} En plein écran vertical, on couperait l&apos;essentiel. Avec bandes, on garde le milieu de l&apos;image, bien plus large, avec des bandes noires en haut et en bas.</p>
         <p className="small">{sorte === "shorts" ? "Ce choix vaut pour tous les Shorts de cette vidéo (les histoires ont leur propre choix)." : "Ce choix vaut pour toutes les parties des histoires de cette vidéo (les Shorts ont leur propre choix)."} Il ne pourra plus être changé.</p>
         {err && <div className="notice bad" role="alert">{err}</div>}
       </div>
-      <div className="cf-apercu" aria-hidden>
-        <figure><div className="cf-tel h"><img src={img} alt="" referrerPolicy="no-referrer" /></div><figcaption>Horizontal</figcaption></figure>
-        <figure><div className="cf-tel v"><img src={img} alt="" referrerPolicy="no-referrer" /></div><figcaption>Vertical</figcaption></figure>
+      <div className="cf-apercu" role="group" aria-label="Cadrage">
+        {options.map((o) => (
+          <button key={o.f} type="button" className={`cf-choix${o.f === reco ? " reco" : ""}`} disabled={envoi} onClick={() => choisir(o.f)}>
+            <span className={`cf-tel ${o.f}`}><img src={img} alt="" referrerPolicy="no-referrer" /></span>
+            <b>{o.nom}</b>
+            <span className="small">{o.f === reco ? "Conseillé" : o.dit}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

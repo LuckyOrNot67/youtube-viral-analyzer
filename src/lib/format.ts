@@ -8,15 +8,17 @@ import LIMITES from "@/config/limites.json";
 // vidéo (avis gardé pour tout le monde), la personne choisit une fois pour toutes, séparément pour les Shorts et
 // pour les histoires (on peut vouloir les Shorts en horizontal et les parties en vertical), et tout sort dans ce format.
 
-export type Format = "vertical" | "horizontal";
+/** « vertical » : plein écran recadré au milieu ; « bandes » : le milieu de l'image, plus large, avec des bandes noires
+ *  en haut et en bas (comme Remakeit) ; « horizontal » : l'image entière. */
+export type Format = "vertical" | "bandes" | "horizontal";
 export type Sorte = "shorts" | "histoires";
 export type Conseil = { format: Format; raison: string };
 
 /** À ajouter à chaque demande où Gemini regarde la vidéo : il donne son avis sur le format en même temps. */
-export const QUESTION_FORMAT = `"format": "vertical" si l'essentiel reste visible en recadrant l'image au centre en 9:16 (une personne face caméra, un sujet au milieu), "horizontal" si on perdrait l'essentiel (écran partagé, texte ou démonstration sur toute la largeur, plan large, plusieurs personnes éloignées)
+export const QUESTION_FORMAT = `"format": "vertical" si l'essentiel reste visible en recadrant l'image au centre en 9:16 (une personne face caméra, un sujet au milieu) ; "bandes" si l'essentiel tient dans le milieu de l'image en 3:4, plus large (deux personnes côte à côte, un plan un peu large) ; "horizontal" seulement s'il faut toute la largeur (écran partagé avec la personne d'un côté et l'écran de l'autre, texte ou démonstration sur toute la largeur)
 "raison_format": "pourquoi, une phrase courte, en français"`;
 
-const Avis = z.object({ format: z.enum(["vertical", "horizontal"]), raison_format: z.string().default("") });
+const Avis = z.object({ format: z.enum(["vertical", "bandes", "horizontal"]), raison_format: z.string().default("") });
 
 /** Lit la réponse de Gemini : { format, raison_format, <cle>: [...] }, ou l'ancien tableau seul. Garde l'avis. */
 export function lireAvecFormat(videoId: string, raw: unknown, cle: string): unknown {

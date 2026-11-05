@@ -6,7 +6,7 @@ import { fmtTime } from "../parse";
 import type { Extrait, Video } from "../types";
 import { commentsOf } from "./comments";
 import { citationsIn, citedMoments, type Moment } from "./moments";
-import { claude, CLAUDE_MODEL, GeminiSurcharge, geminiWatchYouTube, hasClaude, hasGemini, jsonIn } from "./models";
+import { bienFormes, claude, CLAUDE_MODEL, GeminiSurcharge, geminiWatchYouTube, hasClaude, hasGemini, jsonIn } from "./models";
 import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
 import STYLE from "@/config/style-tiktok.json";
@@ -79,7 +79,8 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
   onEtape("video");
   try {
     const raw = lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, watchPrompt(v, moments), v.id)), "passages");
-    candidates = z.array(Candidate).parse(raw);
+    // Un passage mal écrit par Gemini (sans minutage…) est ignoré, sans jeter les autres.
+    candidates = bienFormes(raw, Candidate);
   } catch (e) {
     // Saturé : rien n'est gardé, on réessaiera (voir relance.ts).
     if (e instanceof GeminiSurcharge) throw e;

@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
+import type * as z from "zod/v4";
 import { logCost } from "./events";
 import LIMITES from "@/config/limites.json";
 
@@ -74,6 +75,15 @@ export async function geminiWatchYouTube(videoId: string, duree: number, prompt:
       await new Promise((r) => setTimeout(r, PAUSES[essai]));
     }
   }
+}
+
+/** Les éléments d'une liste renvoyée par l'IA qui ont la bonne forme ; les autres sont ignorés (et comptés dans le journal).
+ *  Une réponse qui n'est pas une liste du tout reste une erreur. */
+export function bienFormes<T>(raw: unknown, schema: z.ZodType<T>): T[] {
+  if (!Array.isArray(raw)) throw new Error("L'IA n'a pas renvoyé de liste.");
+  const ok = raw.flatMap((x) => { const r = schema.safeParse(x); return r.success ? [r.data] : []; });
+  if (ok.length < raw.length) console.warn(`[ia] ${raw.length - ok.length} élément(s) mal formé(s) ignoré(s) sur ${raw.length}`);
+  return ok;
 }
 
 /** Premier bloc JSON d'un texte (Gemini l'entoure parfois de ```json). */

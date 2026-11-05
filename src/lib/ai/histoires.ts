@@ -3,7 +3,7 @@ import * as z from "zod/v4";
 import { cacheGet, cacheSet } from "../db";
 import { fmtTime } from "../parse";
 import type { Video } from "../types";
-import { GeminiSurcharge, geminiWatchYouTube, hasGemini, jsonIn } from "./models";
+import { bienFormes, GeminiSurcharge, geminiWatchYouTube, hasGemini, jsonIn } from "./models";
 import { DUREE_MAX_VIDEO } from "./extraits";
 import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
@@ -53,7 +53,7 @@ async function compute(v: Video): Promise<{ ok: boolean; value: HistoiresResult 
   if (!hasGemini()) return { ok: false, value: { creeLe, histoires: [], avertissement: "Clé Gemini manquante : impossible de regarder la vidéo." } };
   let brutes: z.infer<typeof Brute>[];
   try {
-    brutes = z.array(Brute).parse(lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, prompt(v), v.id)), "histoires"));
+    brutes = bienFormes(lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, prompt(v), v.id)), "histoires"), Brute);
   } catch (e) {
     if (e instanceof GeminiSurcharge) throw e;
     console.warn("[histoires] Gemini :", (e as Error).message);

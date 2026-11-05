@@ -10,7 +10,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const { id } = await params;
     if (!VIDEO_ID.test(id)) throw new UserError("Identifiant de vidéo invalide.");
-    const b = z.object({ sorte: z.enum(["shorts", "histoires"]), format: z.enum(["vertical", "horizontal"]) }).safeParse(await req.json().catch(() => null));
+    const b = z.object({ sorte: z.enum(["shorts", "histoires"]), format: z.enum(["vertical", "bandes", "horizontal"]) }).safeParse(await req.json().catch(() => null));
     if (!b.success) throw new UserError("Format invalide.");
     return NextResponse.json({ choix: choisir(await userId(), id, b.data.sorte, b.data.format) });
   } catch (e) {

@@ -18,7 +18,7 @@ const Body = z.object({
   start: z.number().min(0),
   end: z.number().positive(),
   /** Ignoré : le format vient du choix fait pour les Shorts ou les histoires de la vidéo (vertical par défaut). */
-  cadrage: z.enum(["centre", "entier", "horizontal"]).optional(),
+  cadrage: z.enum(["centre", "entier", "horizontal", "bandes"]).optional(),
   titre: z.string().max(300).optional(),
   /** Une partie d'histoire : le numéro de la partie et l'histoire entière (pour vérifier que la partie en fait bien partie). */
   histoire: z.object({ partie: z.number().int().min(1), start: z.number().min(0), end: z.number().positive() }).optional(),
@@ -37,7 +37,8 @@ export async function POST(req: Request) {
     const { video } = await videoDetail(videoId);
     if (end > video.duration + 1) throw new UserError("Ce passage dépasse la fin de la vidéo.");
     const uid = await userId();
-    const cadrage: Cadrage = choixDe(uid, videoId, h ? "histoires" : "shorts") === "horizontal" ? "horizontal" : "centre";
+    const choix = choixDe(uid, videoId, h ? "histoires" : "shorts");
+    const cadrage: Cadrage = choix === "horizontal" ? "horizontal" : choix === "bandes" ? "bandes" : "centre";
 
     if (h) return NextResponse.json({ id: partieHistoire(uid, video, { start, end, cadrage, titre: b.data.titre ?? "", h }) });
 

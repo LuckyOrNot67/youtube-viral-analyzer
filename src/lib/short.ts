@@ -25,7 +25,7 @@ const KEEP_MS = LIMITES.analyse.conservationJours * 86400_000;
 
 export const hasDownloader = () => existsSync(YTDLP);
 
-export type Cadrage = "centre" | "entier" | "horizontal";
+export type Cadrage = "centre" | "entier" | "horizontal" | "bandes";
 type Etat = "attente" | "telechargement" | "montage" | "pret" | "erreur";
 export type ShortJob = {
   id: string; videoId: string; start: number; end: number; cadrage: Cadrage;
@@ -97,9 +97,11 @@ export function startShort(o: { videoId: string; start: number; end: number; cad
   return { job, nouveau: true };
 }
 
-/** « centre » remplit l'écran vertical (recadré au milieu), « horizontal » garde l'image entière en 1920×1080
+/** « centre » remplit l'écran vertical (recadré au milieu) ; « bandes » garde le milieu de l'image en 3:4, bien plus large,
+ *  avec des bandes noires en haut et en bas (1080×1920) ; « horizontal » garde l'image entière en 1920×1080
  *  (TikTok ajoute des bandes noires), « entier » (ancien) la pose sur un fond flou. */
 export function verticalFilter(c: Cadrage): string {
+  if (c === "bandes") return "[0:v]crop=w=min(iw\\,ih*3/4):h=min(ih\\,iw*4/3),scale=1080:1440,pad=1080:1920:0:240:black,setsar=1,fps=30[vout]";
   if (c === "horizontal") return "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30[vout]";
   if (c === "centre") return "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[vout]";
   return "[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2,eq=brightness=-0.08[bg];"
