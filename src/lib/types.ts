@@ -45,12 +45,13 @@ export type Score = {
   /** Pourquoi la confiance n'est pas haute. */
   confianceRaison: string | null;
   raisons: string[];
-  /** Détail des 4 critères (0 à 1) pour l'écran de détail. */
-  parts: { surperformance: number; vitesse: number; engagement: number; recence: number };
+  /** Le barème : les points gagnés ou perdus sur chaque critère, pour « Comment c'est calculé ». */
+  points: { critere: string; points: number; detail: string }[];
   base: { median: number | null; n: number; ratio: number | null };
   vuesParJour: number;
   /** Vitesse mesurée entre deux relevés (sinon moyenne depuis la publication). */
   vitesseMesuree: boolean;
+  /** Likes par vue. */
   engagement: number | null;
   ageJours: number;
   isShort: boolean;

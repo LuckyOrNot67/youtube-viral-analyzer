@@ -105,11 +105,8 @@ export default function VideoPage() {
       <details className="more">
         <summary>Comment c&apos;est calculé</summary>
         <div className="card col" style={{ gap: 10, marginTop: 8 }}>
-          <ul className="list">{s.raisons.map((r) => <li key={r}>{r}</li>)}</ul>
-          <Crit label="Surperformance" p={s.parts.surperformance} />
-          <Crit label="Vitesse" p={s.parts.vitesse} />
-          <Crit label="Engagement" p={s.parts.engagement} />
-          <Crit label="Récence" p={s.parts.recence} />
+          {(s.points ?? []).map((p) => <Crit key={p.critere} label={p.critere} detail={p.detail} pts={p.points} />)}
+          <div className="crit total"><span>Total</span><span /><span className="p">{fmtScore(s.score)}/10</span></div>
           <p className="small"><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
         </div>
       </details>
@@ -138,12 +135,13 @@ export default function VideoPage() {
   );
 }
 
-function Crit({ label, p }: { label: string; p: number }) {
+/** Une ligne du barème : le critère, ce qui a été mesuré, et les points gagnés ou perdus. */
+function Crit({ label, detail, pts }: { label: string; detail: string; pts: number }) {
   return (
     <div className="crit">
       <span>{label}</span>
-      <div className="bar"><span style={{ width: `${Math.round(p * 100)}%` }} /></div>
-      <span className="p">{Math.round(p * 100)}</span>
+      <span className="dim">{detail}</span>
+      <span className={`p${pts > 0 ? " plus" : pts < 0 ? " moins" : ""}`}>{pts > 0 ? "+" : pts < 0 ? "−" : ""}{fmtScore(Math.abs(pts))}</span>
     </div>
   );
 }

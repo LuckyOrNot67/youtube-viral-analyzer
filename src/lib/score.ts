@@ -1,11 +1,14 @@
-// Score d'explosion : pur (sans réseau ni base) pour être testé et reproductible.
-// Principe : comparer chaque vidéo aux vidéos de la MÊME chaîne, du même format et d'un âge comparable,
-// plutôt qu'au nombre d'abonnés seul (arrondi par l'API, parfois masqué).
+// Score de viralité : pur (sans réseau ni base) pour être testé et reproductible.
+// Un barème en points, lisible par tout le monde :
+//   - Portée (0 à 5) : le nombre de vues tout court. Une vidéo de Squeezie à 20 M part forcément haut.
+//   - Par rapport à d'habitude (−1,5 à +3) : comparée aux vidéos de la MÊME chaîne, du même format et d'un âge proche.
+//   - Likes et commentaires (0 à +1 chacun) : par vue, comparés à ceux de la chaîne. Jamais de malus : une vidéo qui
+//     devient virale touche des gens qui ne likent pas, son taux baisse justement parce qu'elle marche.
+//   - Fraîcheur (0 à +2) : une vidéo récente qui marche compte plus qu'un succès d'il y a un an.
+// Le total est ramené entre 0 et 10.
 
 import type { Confiance, Score, Video } from "./types";
 
-export const POIDS = { surperformance: 0.5, vitesse: 0.25, engagement: 0.15, recence: 0.1 };
-/** En dessous, quelques likes ne doivent pas suffire à obtenir un gros score. */
 export const VUES_MIN = 5000;
 const PLAFOND_PEU_DE_VUES = 5;
 /** Poids (en vues) de la moyenne de la chaîne dans l'engagement : lisse les vidéos qui ont peu de vues. */
@@ -24,7 +27,6 @@ export function median(xs: number[]): number | null {
 
 export const ageDays = (v: Pick<Video, "publishedAt">, now: number) => Math.max((now - Date.parse(v.publishedAt)) / DAY, 1 / 24);
 const isShort = (v: Pick<Video, "duration">) => v.duration > 0 && v.duration <= SHORT_MAX;
-const engagementOf = (v: Video) => (v.likes === null && v.comments === null ? null : ((v.likes ?? 0) + 2 * (v.comments ?? 0)) / Math.max(v.views, 1));
 
 /** Vidéos comparables : même chaîne, même format, âge entre la moitié et le double (élargi au tiers / triple
  *  s'il y en a moins de 10) ; sinon toutes celles du même format de plus de 2 jours. */
@@ -50,49 +52,79 @@ export function velocity(v: Video, snaps: Snapshot[], now: number): { vpd: numbe
   return { vpd: v.views / ageDays(v, now), mesuree: false };
 }
 
+const likesParVue = (v: Video) => (v.likes === null ? null : v.likes / Math.max(v.views, 1));
+const comsParVue = (v: Video) => (v.comments === null ? null : v.comments / Math.max(v.views, 1));
+/** Taux lissé vers celui de la chaîne : une vidéo à peu de vues ne gagne pas de points sur trois likes. */
+const lisse = (x: number, v: Video, prior: number) => (x * v.views + prior * LISSAGE) / (v.views + LISSAGE);
+const pct = (r: number) => `${r >= 1 ? "+" : "−"}${Math.round(Math.abs(r - 1) * 100)} %`;
+
+/** Points « par rapport à d'habitude » : +20 % → +1, ×2 → +2, ×4 → +3 ; −20 % → −1, ÷2 → −1,5. */
+export function pointsHabitude(r: number): number {
+  if (r >= 4) return 3;
+  if (r >= 2) return 2;
+  if (r >= 1.2) return 1;
+  if (r > 0.8) return 0;
+  if (r > 0.5) return -1;
+  return -1.5;
+}
+
+/** Points de likes ou de commentaires par vue, comparés à la chaîne : +20 % → +1, sinon 0. */
+const pointsTaux = (r: number) => (r >= 1.2 ? 1 : 0);
+
 export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?: Snapshot[]; subs?: number | null }): Score {
   const { now } = opts;
   const age = ageDays(v, now);
   const comp = comparables(v, pool, now);
   const base = median(comp.map((p) => p.views));
   const ratio = base ? v.views / base : null;
+  const points: Score["points"] = [];
 
-  // 1. Surperformance : log2 du rapport à la normale. 0,5× → 0 ; 1× → 0,25 ; 2× → 0,5 ; 8× → 1.
-  const S = ratio === null ? 0.25 : clamp((Math.log2(Math.max(ratio, 1e-6)) + 1) / 4);
-  // 2. Vitesse : 100 vues/jour → 0 ; 1 million/jour → 1 (échelle log).
-  const { vpd, mesuree } = velocity(v, opts.snaps ?? [], now);
-  const V = clamp((Math.log10(Math.max(vpd, 1)) - 2) / 4);
-  // 3. Engagement, lissé vers celui de la chaîne puis rapporté à lui : 0,5× → 0 ; 1× → 0,33 ; 4× → 1.
-  const eRaw = engagementOf(v);
-  const eMed = median(comp.map(engagementOf).filter((x): x is number => x !== null));
-  let E = 0.33, eShr: number | null = null;
-  if (eRaw !== null) {
-    // Une chaîne sans aucun like ni commentaire donnerait une division par zéro.
-    const prior = eMed ? eMed : 0.04;
-    eShr = (eRaw * v.views + prior * LISSAGE) / (v.views + LISSAGE);
-    E = clamp((Math.log2(eShr / prior) + 1) / 3);
+  // 1. Portée : 1 000 vues → 0,6 ; 100 000 → 2,6 ; 1 M → 3,6 ; 10 M → 4,6 ; 25 M et plus → 5.
+  const portee = clamp(Math.log10(Math.max(v.views, 1)) - 2.4, 0, 5);
+  points.push({ critere: "Portée", points: portee, detail: `${fmtNum(v.views)} vues` });
+
+  // 2. Par rapport à d'habitude. Une vidéo bien plus jeune que celles à qui on la compare n'a pas encore fini de
+  //    faire ses vues : elle peut gagner des points, pas en perdre.
+  if (ratio !== null && base !== null) {
+    const ageComp = median(comp.map((p) => ageDays(p, now))) ?? age;
+    const tropJeune = ageComp > 2 * age;
+    const pts = tropJeune ? Math.max(0, pointsHabitude(ratio)) : pointsHabitude(ratio);
+    points.push({ critere: "Par rapport à d'habitude", points: pts, detail: `${pct(ratio)} par rapport aux ${fmtNum(base)} vues habituelles de la chaîne${tropJeune && pts === 0 ? " (vidéo encore jeune, pas de malus)" : ""}` });
+  } else points.push({ critere: "Par rapport à d'habitude", points: 0, detail: "pas assez de vidéos sur la chaîne pour comparer" });
+
+  // 3. Likes et commentaires par vue, comparés à la chaîne (lissés, pour ne pas récompenser trois likes).
+  for (const [critere, f] of [["Likes", likesParVue], ["Commentaires", comsParVue]] as const) {
+    const x = f(v), med = median(comp.map(f).filter((y): y is number => y !== null));
+    if (x === null || !med) { points.push({ critere, points: 0, detail: x === null ? "masqués" : "pas de comparaison possible" }); continue; }
+    const r = lisse(x, v, med) / med;
+    points.push({ critere, points: pointsTaux(r), detail: `${pct(r)} par vue par rapport à d'habitude` });
   }
-  // 4. Récence : pleine jusqu'à 7 jours, puis baisse jusqu'à 0 à 90 jours.
-  const R = age <= 7 ? 1 : clamp(1 - (age - 7) / 83);
 
-  let score = 10 * (POIDS.surperformance * S + POIDS.vitesse * V + POIDS.engagement * E + POIDS.recence * R);
+  // 4. Fraîcheur : une semaine +2 ; un mois +1,5 ; 3 mois +1 ; 6 mois +0,5 ; au-delà 0.
+  const fraicheur = age <= 7 ? 2 : age <= 31 ? 1.5 : age <= 92 ? 1 : age <= 183 ? 0.5 : 0;
+  points.push({ critere: "Fraîcheur", points: fraicheur, detail: `publiée ${age < 1 ? "aujourd'hui" : `il y a ${fmtJours(age)}`}` });
+
+  let score = clamp(points.reduce((t, p) => t + p.points, 0), 0, 10);
   if (v.views < VUES_MIN) score = Math.min(score, PLAFOND_PEU_DE_VUES);
   score = Math.round(score * 10) / 10;
 
+  const { vpd, mesuree } = velocity(v, opts.snaps ?? [], now);
   const { confiance, confianceRaison } = confidence(comp.length, age, v);
   return {
     score, label: labelOf(score), confiance, confianceRaison,
-    raisons: reasons({ v, ratio, base, n: comp.length, vpd, mesuree, eShr, eMed, subs: opts.subs ?? null, age }),
-    parts: { surperformance: S, vitesse: V, engagement: E, recence: R },
+    raisons: reasons({ v, ratio, base, n: comp.length, vpd, mesuree, subs: opts.subs ?? null }),
+    points: points.map((p) => ({ ...p, points: Math.round(p.points * 10) / 10 })),
     base: { median: base, n: comp.length, ratio },
-    vuesParJour: vpd, vitesseMesuree: mesuree, engagement: eRaw, ageJours: age, isShort: isShort(v),
+    vuesParJour: vpd, vitesseMesuree: mesuree, engagement: likesParVue(v), ageJours: age, isShort: isShort(v),
   };
 }
 
+const fmtJours = (j: number) => (j < 30 ? `${Math.round(j)} j` : j < 365 ? `${Math.round(j / 30)} mois` : `${(Math.round(j / 36.5) / 10).toString().replace(".", ",")} an${j >= 730 ? "s" : ""}`);
+
 export function labelOf(score: number) {
-  if (score >= 8) return "Forte surperformance";
-  if (score >= 6.5) return "Surperformance";
-  if (score >= 5) return "Au-dessus de la normale";
+  if (score >= 8) return "Explose";
+  if (score >= 6.5) return "Très bonne";
+  if (score >= 5) return "Bonne";
   return "Normale";
 }
 
@@ -115,7 +147,7 @@ export const fmtNum = (x: number) => {
 };
 const fmtX = (r: number) => `${(Math.round(r * 10) / 10).toString().replace(".", ",")}×`;
 
-function reasons(a: { v: Video; ratio: number | null; base: number | null; n: number; vpd: number; mesuree: boolean; eShr: number | null; eMed: number | null; subs: number | null; age: number }): string[] {
+function reasons(a: { v: Video; ratio: number | null; base: number | null; n: number; vpd: number; mesuree: boolean; subs: number | null }): string[] {
   const out: string[] = [];
   if (a.ratio !== null && a.base !== null) {
     if (a.ratio >= 1.5) out.push(`${fmtX(a.ratio)} les vues habituelles de la chaîne (${fmtNum(a.base)} en médiane sur ${a.n} vidéos comparables)`);
@@ -123,11 +155,6 @@ function reasons(a: { v: Video; ratio: number | null; base: number | null; n: nu
     else out.push(`En dessous de la normale de la chaîne (${fmtNum(a.base)} vues en médiane)`);
   } else out.push("Pas assez de vidéos sur la chaîne pour la comparer");
   out.push(a.mesuree ? `${fmtNum(a.vpd)} vues par jour en ce moment (mesuré entre deux relevés)` : `${fmtNum(a.vpd)} vues par jour en moyenne depuis sa sortie`);
-  if (a.eShr !== null && a.eMed) {
-    const r = a.eShr / a.eMed;
-    if (r >= 1.4) out.push(`${fmtX(r)} plus de likes et commentaires par vue que d'habitude`);
-    else if (r <= 0.7) out.push("Moins de likes et commentaires par vue que d'habitude");
-  }
   if (a.subs && a.v.views >= a.subs * 3) out.push(`${fmtX(a.v.views / a.subs)} le nombre d'abonnés de la chaîne`);
   return out.slice(0, 3);
 }

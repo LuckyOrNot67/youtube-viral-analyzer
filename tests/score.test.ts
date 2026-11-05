@@ -38,14 +38,32 @@ test("une vidéo dans la normale reste moyenne", () => {
   assert.equal(s.label, "Normale");
 });
 
-test("la taille de la chaîne ne fait pas le score : même rapport, même surperformance", () => {
+test("même rapport à la chaîne, mêmes points « d'habitude », mais la grosse chaîne part plus haut", () => {
   const small = channel(5_000).map((v) => ({ ...v, channelId: "petite" }));
   const big = channel(5_000_000).map((v) => ({ ...v, channelId: "grande" }));
   const a = vid({ channelId: "petite", views: 40_000, age: 10 });
   const b = vid({ channelId: "grande", views: 40_000_000, age: 10 });
   const sa = scoreVideo(a, [...small, a], { now: NOW }), sb = scoreVideo(b, [...big, b], { now: NOW });
-  assert.equal(sa.parts.surperformance, sb.parts.surperformance);
-  assert.ok(sb.score - sa.score < 2.6, "la vitesse absolue ne pèse que 25 %");
+  const habitude = (s: typeof sa) => s.points.find((p) => p.critere === "Par rapport à d'habitude")!.points;
+  assert.equal(habitude(sa), habitude(sb));
+  assert.ok(sb.score > sa.score);
+});
+
+test("un gros youtubeur dans sa normale : ≈ 5 au bout d'un an, au-dessus de 5 à un mois", () => {
+  const pool = Array.from({ length: 30 }, (_, i) => vid({ channelId: "squeezie", views: 20_000_000 * (0.8 + (i % 5) * 0.1), age: 20 + i * 25 }));
+  const unMois = vid({ channelId: "squeezie", views: 18_000_000, age: 30 });
+  const unAn = vid({ channelId: "squeezie", views: 20_000_000, age: 365 });
+  const s1 = scoreVideo(unMois, [...pool, unMois], { now: NOW }), s2 = scoreVideo(unAn, [...pool, unAn], { now: NOW });
+  assert.ok(s1.score > 5, `un mois : ${s1.score}`);
+  assert.ok(s2.score >= 4.5 && s2.score <= 5.5, `un an : ${s2.score}`);
+});
+
+test("une vidéo toute jeune n'est pas punie de ne pas encore avoir fait ses vues", () => {
+  const pool = Array.from({ length: 30 }, (_, i) => vid({ channelId: "squeezie", views: 20_000_000, age: 30 + i * 20 }));
+  const v = vid({ channelId: "squeezie", views: 3_000_000, age: 1 });
+  const s = scoreVideo(v, [...pool, v], { now: NOW });
+  assert.ok(s.points.every((p) => p.points >= 0), JSON.stringify(s.points));
+  assert.ok(s.score >= 5, `score ${s.score}`);
 });
 
 test("peu de vues : score plafonné même avec un énorme engagement", () => {
