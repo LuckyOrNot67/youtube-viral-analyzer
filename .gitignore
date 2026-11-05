@@ -20,3 +20,5 @@ next-env.d.ts
 /.next-prod-v7/
 /.next-prod-v8/
 /.next-prod-v9/
+/.next-prod-v10/
+/.next-prod-v11/
