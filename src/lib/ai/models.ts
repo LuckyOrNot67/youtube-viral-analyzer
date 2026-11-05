@@ -49,16 +49,27 @@ const PAUSES = [5_000, 15_000, 30_000];
 /** Gemini regarde une vidéo YouTube publique à partir de son lien (aucun téléchargement de notre côté).
  *  Flash-Lite d'abord : saturé, on attend un peu et on réessaie ; toujours saturé, GeminiSurcharge. Le modèle de
  *  secours, plus cher, n'est utilisé qu'après plusieurs minutes de saturation (relance.ts). */
-export async function geminiWatchYouTube(videoId: string, duree: number, prompt: string, projet: string, timeoutMs = 240_000): Promise<string> {
+export function geminiWatchYouTube(videoId: string, duree: number, prompt: string, projet: string, timeoutMs = 240_000): Promise<string> {
+  return geminiVideo(videoId, { type: "video", uri: `https://www.youtube.com/watch?v=${videoId}`, processing: { type: "static", fps: fpsPour(duree) } }, prompt, projet, timeoutMs);
+}
+
+/** Gemini regarde un petit fichier vidéo de chez nous (un passage déjà téléchargé, en basse définition), envoyé avec
+ *  la demande. Sert au montage auto : beaucoup d'images par seconde sur quelques dizaines de secondes. */
+export function geminiWatchClip(videoId: string, mp4: Buffer, fps: number, prompt: string, projet: string): Promise<string> {
+  return geminiVideo(videoId, { type: "video", data: mp4.toString("base64"), mime_type: "video/mp4", resolution: "low", processing: { type: "static", fps } }, prompt, projet, 120_000);
+}
+
+type Video = { type: "video"; uri?: string; data?: string; mime_type?: string; resolution?: "low"; processing: { type: "static"; fps: number } };
+
+async function geminiVideo(videoId: string, video: Video, prompt: string, projet: string, timeoutMs: number): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const uri = `https://www.youtube.com/watch?v=${videoId}`;
   const model = secours.has(videoId) ? LIMITES.gemini.modeleSecours : GEMINI_MODEL;
   for (let essai = 0; ; essai++) {
     const t0 = Date.now();
     try {
       const res = await ai.interactions.create({
         model,
-        input: [{ type: "video", uri, processing: { type: "static", fps: fpsPour(duree) } }, { type: "text", text: prompt }],
+        input: [video, { type: "text", text: prompt }],
         generation_config: { thinking_level: "low" },
       }, { timeout_ms: timeoutMs });
       const out = res.output_text?.trim();

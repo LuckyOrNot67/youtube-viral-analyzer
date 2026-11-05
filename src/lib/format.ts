@@ -10,18 +10,19 @@ import LIMITES from "@/config/limites.json";
 // sort dans le même cadrage.
 
 /** « vertical » : plein écran recadré au milieu ; « bandes » : le milieu de l'image, plus large, avec des bandes noires
- *  en haut et en bas (comme Remakeit) ; « horizontal » : l'image entière. */
-export type Format = "vertical" | "bandes" | "horizontal";
+ *  en haut et en bas (comme Remakeit) ; « horizontal » : l'image entière ; « auto » : le montage 2.0, le cadre change
+ *  d'un plan à l'autre et suit la personne qui parle (montage.ts). */
+export type Format = "vertical" | "bandes" | "horizontal" | "auto";
 export type Sorte = "shorts" | "histoires";
 /** `centreX` : où sont les personnes ou le sujet dans la largeur de l'image (0 à gauche, 0,5 au milieu, 1 à droite). */
 export type Conseil = { format: Format; raison: string; centreX?: number };
 
 /** À ajouter à chaque demande où Gemini regarde la vidéo : il donne son avis sur le format en même temps. */
-export const QUESTION_FORMAT = `"format": le cadrage pour TikTok, qui est vertical. Préfère toujours le vertical, et ne choisis "horizontal" qu'en tout dernier recours. "vertical" si l'essentiel reste visible en plein écran 9:16 (une personne face caméra, un sujet assez groupé) ; sinon "bandes" : une image plus large (3:4), centrée sur les personnes, avec une petite bande noire en haut et en bas (deux personnes côte à côte, un plateau, un plan un peu large) ; "horizontal" seulement si c'est vraiment impossible autrement, parce que l'essentiel occupe toute la largeur (écran partagé avec la personne d'un côté et l'écran de l'autre, texte ou démonstration d'un bord à l'autre)
+export const QUESTION_FORMAT = `"format": le cadrage pour TikTok, qui est vertical. Préfère toujours le vertical, et ne choisis "horizontal" qu'en tout dernier recours. "auto" si plusieurs personnes sont à l'écran ou si les plans changent souvent (discussion, plateau, bêtisier, film) : le cadre suivra plan par plan la personne qui parle ; "vertical" si l'essentiel reste visible en plein écran 9:16 (une personne face caméra, un sujet assez groupé) ; sinon "bandes" : une image plus large (3:4), centrée sur les personnes, avec une petite bande noire en haut et en bas (un plan un peu large, un sujet qui bouge) ; "horizontal" seulement si c'est vraiment impossible autrement, parce que l'essentiel occupe toute la largeur (écran partagé avec la personne d'un côté et l'écran de l'autre, texte ou démonstration d'un bord à l'autre)
 "raison_format": "pourquoi, une phrase courte, en français"
 "centre_x": où se trouvent les personnes ou le sujet principal dans la largeur de l'image, la plupart du temps (0 = bord gauche, 0.5 = milieu, 1 = bord droit)`;
 
-const Avis = z.object({ format: z.enum(["vertical", "bandes", "horizontal"]), raison_format: z.string().default(""), centre_x: z.number().min(0).max(1).optional() });
+const Avis = z.object({ format: z.enum(["vertical", "bandes", "horizontal", "auto"]), raison_format: z.string().default(""), centre_x: z.number().min(0).max(1).optional() });
 
 /** Lit la réponse de Gemini : { format, raison_format, <cle>: [...] }, ou l'ancien tableau seul. Garde l'avis. */
 export function lireAvecFormat(videoId: string, raw: unknown, cle: string): unknown {

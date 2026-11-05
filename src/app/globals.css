@@ -339,6 +339,8 @@ details.more summary { padding: 4px 2px; }
 .cf-tel.horizontal img { object-fit: contain; }
 .cf-tel.vertical img { object-fit: cover; }
 .cf-tel.bandes img { height: auto; aspect-ratio: 3 / 4; object-fit: cover; }
+.cf-tel.auto { display: flex; flex-direction: column; gap: 2px; }
+.cf-tel.auto img { height: 50%; min-height: 0; object-fit: cover; flex: 1; }
 @media (max-width: 760px) { .choix-format { grid-template-columns: 1fr; } }
 
 /* Champ simple (email « Préviens-moi ») */

@@ -12,7 +12,7 @@ import LIMITES from "@/config/limites.json";
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = MomentCite;
-type Format = "vertical" | "bandes" | "horizontal";
+type Format = "vertical" | "bandes" | "horizontal" | "auto";
 /** L'avis de l'IA sur le format (gardé pour tout le monde) et le choix de la personne, pour les Shorts ou pour les histoires. */
 type FormatInfo = { conseil: { format: Format; raison: string; centreX?: number } | null; choix: Format | null; verrouille?: boolean };
 type ExtraitsRes = { extraits: Extrait[]; moments: Moment[]; source: "gemini" | "commentaires"; avertissement: string | null; format: FormatInfo; formule: { nom: string; shortsParVideo: number }; expireLe: number };
@@ -182,14 +182,15 @@ function SurchargeCarte({ videoId, sorte, email: avecEmail, onRetry }: { videoId
 }
 
 const CADRAGES: { f: Format; nom: string; dit: string }[] = [
+  { f: "auto", nom: "Montage auto", dit: "Nouveau · suit qui parle" },
   { f: "vertical", nom: "Plein écran", dit: "Les côtés sont coupés" },
   { f: "bandes", nom: "Avec bandes", dit: "Plus large, petites bandes noires" },
   { f: "horizontal", nom: "Image entière", dit: "Rien n'est coupé" },
 ];
 const nomCadrage = (f: Format) => CADRAGES.find((c) => c.f === f)?.nom ?? f;
 
-/** Le cadrage des Shorts (ou des parties) : celui conseillé par l'IA s'applique par défaut. Quand l'IA déconseille le
- *  plein écran, on montre d'abord les trois cadrages sur une vraie image de la vidéo. Ensuite une petite barre permet
+/** Le cadrage des Shorts (ou des parties) : celui conseillé par l'IA s'applique par défaut. La première fois, on
+ *  montre les quatre cadrages sur une vraie image de la vidéo. Ensuite une petite barre permet
  *  d'en changer, tant que rien n'a été créé. */
 function ChoixFormat({ videoId, sorte, info, cree, children }: { videoId: string; sorte: Sorte; info: FormatInfo | undefined; cree: boolean; children: ReactNode }) {
   const [choix, setChoix] = useState<Format | null>(null);
@@ -200,20 +201,22 @@ function ChoixFormat({ videoId, sorte, info, cree, children }: { videoId: string
   const reco = info.conseil?.format ?? "vertical";
   const actuel = choix ?? info.choix ?? reco;
   const fige = Boolean(info.verrouille) || cree;
-  // La première fois, si l'IA déconseille le plein écran : on demande avant de montrer les résultats.
-  const premiereFois = !choix && !info.choix && reco !== "vertical" && !fige;
+  // La première fois, on montre toujours les cadrages (dont le montage auto) avant les résultats.
+  const premiereFois = !choix && !info.choix && !fige;
   const choisir = (format: Format) => {
     setEnvoi(true); setErr(null);
     api<{ choix: Format }>(`/api/video/${videoId}/format`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sorte, format }) })
       .then((r) => { setChoix(r.choix); setOuvert(false); }).catch((e) => setErr(e.message)).finally(() => setEnvoi(false));
   };
   // Une vraie image du milieu de la vidéo (pas la miniature), cadrée comme le serait le Short.
+  const img = (x: number) => (
+    <img src={`https://i.ytimg.com/vi/${videoId}/maxres2.jpg`} alt="" referrerPolicy="no-referrer"
+      style={{ objectPosition: `${Math.round(x * 100)}% 40%` }}
+      onError={(e) => { const i = e.currentTarget; if (!i.src.includes("mq2")) i.src = `https://i.ytimg.com/vi/${videoId}/mq2.jpg`; }} />
+  );
+  // Montage auto : l'écran coupé (une personne en haut, l'autre en bas), le cas qui le distingue le mieux.
   const image = (f: Format) => (
-    <span className={`cf-tel ${f}`}>
-      <img src={`https://i.ytimg.com/vi/${videoId}/maxres2.jpg`} alt="" referrerPolicy="no-referrer"
-        style={{ objectPosition: `${Math.round((info.conseil?.centreX ?? 0.5) * 100)}% 50%` }}
-        onError={(e) => { const i = e.currentTarget; if (!i.src.includes("mq2")) i.src = `https://i.ytimg.com/vi/${videoId}/mq2.jpg`; }} />
-    </span>
+    <span className={`cf-tel ${f}`}>{f === "auto" ? <>{img(0.25)}{img(0.75)}</> : img(info.conseil?.centreX ?? 0.5)}</span>
   );
   if (premiereFois || ouvert) {
     return (
@@ -231,7 +234,7 @@ function ChoixFormat({ videoId, sorte, info, cree, children }: { videoId: string
             <button key={o.f} type="button" className={`cf-choix${o.f === reco ? " reco" : ""}${ouvert && o.f === actuel ? " on" : ""}`} disabled={envoi} onClick={() => choisir(o.f)}>
               {image(o.f)}
               <b>{o.nom}</b>
-              <span className="small">{o.f === reco ? "Conseillé" : o.dit}</span>
+              <span className="small">{o.f === reco ? (o.f === "auto" ? "Nouveau · conseillé" : "Conseillé") : o.dit}</span>
             </button>
           ))}
         </div>

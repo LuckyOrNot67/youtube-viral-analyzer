@@ -5,10 +5,13 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
-import { ffmpeg, probe } from "./ai/ffmpeg";
+import { ffmpeg, probe, sceneCuts } from "./ai/ffmpeg";
 import { logCost } from "./ai/events";
 import { db } from "./db";
 import { conseilDe } from "./format";
+import { planParPlan } from "./ai/montage-ia";
+import { filtreMontage, morceaux } from "./montage";
+import type { Phrase } from "./sous-titres";
 import LIMITES from "@/config/limites.json";
 
 // Export d'un Short vertical à partir d'un passage d'une vidéo YouTube : yt-dlp télécharge seulement les passages
@@ -26,7 +29,9 @@ const KEEP_MS = LIMITES.analyse.conservationJours * 86400_000;
 
 export const hasDownloader = () => existsSync(YTDLP);
 
-export type Cadrage = "centre" | "entier" | "horizontal" | "bandes";
+export type Cadrage = "centre" | "entier" | "horizontal" | "bandes" | "auto";
+/** Pour le montage auto : les sous-titres de la vidéo (qui parle, et quand). */
+export type InfosMontage = () => Promise<Phrase[]>;
 type Etat = "attente" | "telechargement" | "montage" | "pret" | "erreur";
 export type ShortJob = {
   id: string; videoId: string; start: number; end: number; cadrage: Cadrage;
@@ -82,7 +87,7 @@ export function exportesPour(uid: string, videoId: string): Passage[] {
 }
 
 /** Un même passage déjà demandé par la même personne n'est pas refait. `autres` : les passages à télécharger dans la foulée. */
-export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; partie?: number }): { job: ShortJob; nouveau: boolean } {
+export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; partie?: number; montage?: InfosMontage }): { job: ShortJob; nouveau: boolean } {
   const row = db().prepare("SELECT id FROM shorts WHERE user = ? AND video = ? AND start = ? AND end = ? AND cadrage = ? AND at > ? AND etat != 'erreur'")
     .get(o.uid, o.videoId, o.start, o.end, o.cadrage, Date.now() - KEEP_MS) as { id: string } | undefined;
   const same = row && getJob(row.id);
@@ -91,7 +96,7 @@ export function startShort(o: { videoId: string; start: number; end: number; cad
   jobs.set(job.id, job);
   db().prepare("INSERT INTO shorts (id, user, video, start, end, cadrage, titre, video_titre, etat, erreur, at, partie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'attente', NULL, ?, ?)")
     .run(job.id, o.uid, o.videoId, o.start, o.end, o.cadrage, o.titre.slice(0, 200), o.videoTitre.slice(0, 200), job.createdAt, o.partie ?? null);
-  run(job, o.autres)
+  run(job, o.autres, o.montage)
     .catch((e) => { job.etat = "erreur"; job.erreur = (e as Error).message; console.warn("[short]", (e as Error).message); })
     .finally(() => db().prepare("UPDATE shorts SET etat = ?, erreur = ? WHERE id = ?").run(job.etat, job.erreur, job.id));
   cleanup().catch(() => {});
@@ -159,7 +164,7 @@ async function telecharger(videoId: string, passages: Passage[]) {
   await fin;
 }
 
-async function run(job: ShortJob, autres: Passage[]) {
+async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
   const t0 = Date.now();
   await mkdir(DIR, { recursive: true });
   job.etat = "telechargement";
@@ -172,9 +177,24 @@ async function run(job: ShortJob, autres: Passage[]) {
   // Le passage téléchargé commence ~1 s avant ; on recale précisément sur le début demandé.
   const len = job.end - job.start;
   const offset = Math.max(0, Math.min(job.start - marge(source).from, Math.max(0, duration - len)));
+  const centreX = conseilDe(job.videoId)?.centreX;
+  let filtre = verticalFilter(job.cadrage === "auto" ? "bandes" : job.cadrage, centreX);
+  if (job.cadrage === "auto" && montage) {
+    // Montage auto : Gemini regarde le passage et dit qui suivre ; ses changements sont recalés sur les vrais
+    // changements de plan. S'il ne répond pas, le Short sort quand même, avec les bandes.
+    const phrases = (await montage().catch(() => [] as Phrase[]))
+      .filter((p) => p.end > job.start && p.start < job.end).map((p) => ({ ...p, start: p.start - job.start, end: p.end - job.start }));
+    const [plans, coupes] = await Promise.all([
+      planParPlan(job.videoId, job.start, job.end, input, offset, phrases).catch((e) => { console.warn("[short] montage auto :", (e as Error).message); return []; }),
+      sceneCuts(input),
+    ]);
+    const ms = morceaux(plans, 0, len, coupes.map((c) => c - offset).filter((c) => c > 0 && c < len), phrases.map((p) => p.start), centreX);
+    console.info(`[short] ${job.videoId} montage auto : ${plans.length} changements notés, ${ms.length} morceaux (${ms.map((m) => `${m.a}:${m.mode}`).join(" ")})`);
+    filtre = filtreMontage(ms);
+  }
   await ffmpeg([
     "-ss", offset.toFixed(2), "-i", input, "-t", String(len),
-    "-filter_complex", verticalFilter(job.cadrage, conseilDe(job.videoId)?.centreX), "-map", "[vout]",
+    "-filter_complex", filtre, "-map", "[vout]",
     ...(hasAudio ? ["-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"] : []),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
     fileOf(job.id),
