@@ -49,13 +49,15 @@ test("même rapport à la chaîne, mêmes points « d'habitude », mais la gross
   assert.ok(sb.score > sa.score);
 });
 
-test("un gros youtubeur dans sa normale : ≈ 5 au bout d'un an, au-dessus de 5 à un mois", () => {
-  const pool = Array.from({ length: 30 }, (_, i) => vid({ channelId: "squeezie", views: 20_000_000 * (0.8 + (i % 5) * 0.1), age: 20 + i * 25 }));
-  const unMois = vid({ channelId: "squeezie", views: 18_000_000, age: 30 });
-  const unAn = vid({ channelId: "squeezie", views: 20_000_000, age: 365 });
-  const s1 = scoreVideo(unMois, [...pool, unMois], { now: NOW }), s2 = scoreVideo(unAn, [...pool, unAn], { now: NOW });
-  assert.ok(s1.score > 5, `un mois : ${s1.score}`);
-  assert.ok(s2.score >= 4.5 && s2.score <= 5.5, `un an : ${s2.score}`);
+test("le temps compte : 17,8 M en 2 mois passe devant 22,5 M en 2 ans et 17,2 M en 1 an", () => {
+  const pool = Array.from({ length: 30 }, (_, i) => vid({ channelId: "squeezie", views: 15_000_000 * (0.8 + (i % 5) * 0.1), age: 20 + i * 25 }));
+  const deuxMois = vid({ channelId: "squeezie", views: 17_800_000, age: 62 });
+  const unAn = vid({ channelId: "squeezie", views: 17_200_000, age: 365 });
+  const deuxAns = vid({ channelId: "squeezie", views: 22_500_000, age: 730 });
+  const all = [...pool, deuxMois, unAn, deuxAns];
+  const [a, b, c] = [deuxMois, unAn, deuxAns].map((v) => scoreVideo(v, all, { now: NOW }).score);
+  assert.ok(a > b && a > c, `2 mois ${a}, 1 an ${b}, 2 ans ${c}`);
+  assert.ok(a > 5, `2 mois ${a}`);
 });
 
 test("une vidéo toute jeune n'est pas punie de ne pas encore avoir fait ses vues", () => {

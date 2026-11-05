@@ -1,10 +1,11 @@
 // Score de viralité : pur (sans réseau ni base) pour être testé et reproductible.
-// Un barème en points, lisible par tout le monde :
-//   - Portée (0 à 5) : le nombre de vues tout court. Une vidéo de Squeezie à 20 M part forcément haut.
+// Un barème en points, lisible par tout le monde. Le temps compte d'abord : 17,8 M de vues en 2 mois valent bien
+// plus que 22,5 M en 2 ans, et le but est de poster ce qui marche en ce moment.
+//   - Vues par jour (0 à 5) : les vues rapportées au temps depuis la sortie. Une vidéo de Squeezie part forcément haut.
 //   - Par rapport à d'habitude (−1,5 à +3) : comparée aux vidéos de la MÊME chaîne, du même format et d'un âge proche.
-//   - Likes et commentaires (0 à +1 chacun) : par vue, comparés à ceux de la chaîne. Jamais de malus : une vidéo qui
-//     devient virale touche des gens qui ne likent pas, son taux baisse justement parce qu'elle marche.
-//   - Fraîcheur (0 à +2) : une vidéo récente qui marche compte plus qu'un succès d'il y a un an.
+//   - Likes (0 à +0,5) et commentaires (0 à +0,25) : un petit coup de pouce, par vue, comparés à la chaîne. Jamais de malus : une vidéo
+//     qui devient virale touche des gens qui ne likent pas, son taux baisse justement parce qu'elle marche.
+//   - Fraîcheur (−1 à +2) : une vidéo récente compte plus ; au-delà d'un an, elle ne peut plus être en tête.
 // Le total est ramené entre 0 et 10.
 
 import type { Confiance, Score, Video } from "./types";
@@ -68,7 +69,7 @@ export function pointsHabitude(r: number): number {
   return -1.5;
 }
 
-/** Points de likes ou de commentaires par vue, comparés à la chaîne : +20 % → +1, sinon 0. */
+/** Likes ou commentaires par vue, comparés à la chaîne : +20 % → le bonus entier (multiplié par son plafond), sinon 0. */
 const pointsTaux = (r: number) => (r >= 1.2 ? 1 : 0);
 
 export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?: Snapshot[]; subs?: number | null }): Score {
@@ -79,9 +80,11 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
   const ratio = base ? v.views / base : null;
   const points: Score["points"] = [];
 
-  // 1. Portée : 1 000 vues → 0,6 ; 100 000 → 2,6 ; 1 M → 3,6 ; 10 M → 4,6 ; 25 M et plus → 5.
-  const portee = clamp(Math.log10(Math.max(v.views, 1)) - 2.4, 0, 5);
-  points.push({ critere: "Portée", points: portee, detail: `${fmtNum(v.views)} vues` });
+  // 1. Vues par jour depuis la sortie (pas le rythme du moment, qui retombe toujours après les premiers jours) :
+  //    100 → 0 ; 1 000 → 1,25 ; 10 000 → 2,5 ; 100 000 → 3,75 ; 1 M et plus → 5.
+  const moyenne = v.views / age;
+  const parJour = clamp((Math.log10(Math.max(moyenne, 1)) - 2) * 1.25, 0, 5);
+  points.push({ critere: "Vues par jour", points: parJour, detail: `${fmtNum(v.views)} vues en ${fmtJours(age)}, soit ${fmtNum(moyenne)} par jour` });
 
   // 2. Par rapport à d'habitude. Une vidéo bien plus jeune que celles à qui on la compare n'a pas encore fini de
   //    faire ses vues : elle peut gagner des points, pas en perdre.
@@ -93,15 +96,15 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
   } else points.push({ critere: "Par rapport à d'habitude", points: 0, detail: "pas assez de vidéos sur la chaîne pour comparer" });
 
   // 3. Likes et commentaires par vue, comparés à la chaîne (lissés, pour ne pas récompenser trois likes).
-  for (const [critere, f] of [["Likes", likesParVue], ["Commentaires", comsParVue]] as const) {
+  for (const [critere, f, max] of [["Likes", likesParVue, 0.5], ["Commentaires", comsParVue, 0.25]] as const) {
     const x = f(v), med = median(comp.map(f).filter((y): y is number => y !== null));
     if (x === null || !med) { points.push({ critere, points: 0, detail: x === null ? "masqués" : "pas de comparaison possible" }); continue; }
     const r = lisse(x, v, med) / med;
-    points.push({ critere, points: pointsTaux(r), detail: `${pct(r)} par vue par rapport à d'habitude` });
+    points.push({ critere, points: pointsTaux(r) * max, detail: `${pct(r)} par vue par rapport à d'habitude` });
   }
 
-  // 4. Fraîcheur : une semaine +2 ; un mois +1,5 ; 3 mois +1 ; 6 mois +0,5 ; au-delà 0.
-  const fraicheur = age <= 7 ? 2 : age <= 31 ? 1.5 : age <= 92 ? 1 : age <= 183 ? 0.5 : 0;
+  // 4. Fraîcheur : une semaine +2 ; un mois +1,5 ; 3 mois +1 ; 6 mois +0,5 ; un an 0 ; plus d'un an −1.
+  const fraicheur = age <= 7 ? 2 : age <= 31 ? 1.5 : age <= 92 ? 1 : age <= 183 ? 0.5 : age <= 366 ? 0 : -1;
   points.push({ critere: "Fraîcheur", points: fraicheur, detail: `publiée ${age < 1 ? "aujourd'hui" : `il y a ${fmtJours(age)}`}` });
 
   let score = clamp(points.reduce((t, p) => t + p.points, 0), 0, 10);
