@@ -1,33 +1,32 @@
-// Montage auto (3.0) : le cadre se comporte comme un monteur. Pour chaque plan de la caméra, on repère toutes les
-// personnes (leur corps et leur tête, et aussi les animaux), on les suit d'une image à l'autre, et on note chacune
-// toutes les demi-secondes : est-ce qu'elle parle (sa bouche bouge pendant qu'on entend une voix), est-ce qu'elle fait
-// de grands gestes, est-ce qu'elle est près de la caméra. La meilleure note prend le cadre :
-// - « tete » : elle parle sans bouger : zoom sur la tête et les épaules ;
-// - « corps » : elle fait un grand geste (ou on ne voit pas son visage) : tout son corps dans le cadre vertical ;
-// - « duo » : deux personnes éloignées qui se répondent très vite : une en haut, l'autre en bas ;
-// - « flou » : personne à l'écran (texte, animation) : l'image entière sur un fond flouté.
-// Entre deux personnes (ou de la tête au corps), le cadre coupe net, comme un monteur ; quand il suit la même personne,
-// il glisse en douceur. Le public assis au fond (petit, immobile, silencieux) ne prend jamais le cadre.
-// Sources : FFmpeg (les changements de plan), scripts/personnes.py (corps, visages, bouche, gestes, voix), les
-// sous-titres (débuts de phrase) et Gemini (ai/montage-ia.ts), qui ne sert plus qu'à départager.
+// Montage auto : l'image horizontale est découpée en zones fixes, et le Short passe d'une zone à l'autre selon qui
+// parle, comme un monteur qui change de caméra :
+// - « centre » : la bande verticale du milieu (format TikTok) ;
+// - « gauche » / « droite » : la moitié gauche ou droite de l'image, cadrée en vertical ;
+// - « duo » : la moitié gauche en haut et la moitié droite en bas, quand les deux côtés parlent.
+// Le cadre ne bouge jamais à l'intérieur d'une zone : il ne fait que changer de zone, net, au début d'une phrase ou à
+// un changement de plan de la caméra.
+// Qui parle : scripts/personnes.py mesure, pour chaque visage, le mouvement de la bouche pendant qu'on entend une voix.
 
 export type Mode = "un" | "duo" | "rien";
 /** Un changement noté par Gemini : à partir de `t` (secondes depuis le début du passage), le cadre suit `x` (0 à
  *  gauche, 1 à droite) ; en duo, `x` va en haut et `x2` en bas. */
 export type Plan = { t: number; mode: Mode; x: number; x2?: number };
 /** Ce qu'on voit et entend à `t` (secondes depuis le début du passage), positions et tailles entre 0 et 1.
- *  `c` : les corps [centre x, centre y, largeur, hauteur, confiance, classe (0 = personne), geste] ;
- *  `f` : les visages [centre x, centre y, largeur, hauteur, confiance, bouche] ; `voix` : le volume. */
+ *  `f` : les visages [centre x, centre y, largeur, hauteur, confiance, bouche] ; `c` : les corps ; `voix` : le volume. */
 export type Echantillon = { t: number; f: number[][]; c?: number[][]; voix?: number };
-/** Une position du cadre à un instant ; entre deux positions d'un même morceau, le cadre glisse. */
-export type Cle = { t: number; x: number; y: number; x2: number; y2: number };
+export type Zone = "gauche" | "centre" | "droite" | "duo";
 /** Un morceau du Short, en secondes depuis le début du Short. */
-export type Morceau = { a: number; b: number; mode: "tete" | "corps" | "duo" | "flou"; cles: Cle[] };
+export type Morceau = { a: number; b: number; mode: Zone };
 
 const borne = (x: unknown, def = 0.5) => (typeof x === "number" && Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : def);
 const round = (n: number, p = 100) => Math.round(n * p) / p;
 const mediane = (v: number[]) => { const s = [...v].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
 const moyenne = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
+
+/** La zone dont le milieu est le plus proche du visage. */
+const coteDe = (x: number): "gauche" | "centre" | "droite" => (x < 0.375 ? "gauche" : x > 0.625 ? "droite" : "centre");
+/** Le centre de chaque zone plein écran, dans la largeur de l'image. */
+export const CENTRES = { gauche: 0.25, centre: 0.5, droite: 0.75 } as const;
 
 /** Lit la réponse de Gemini : [[t, "un", x], [t, "duo", x, x2], [t, "rien"]], ou des objets { t, mode, x, x2 }.
  *  Ce qui est mal formé est ignoré. */
@@ -59,85 +58,6 @@ export function coupesVisages(ech: Echantillon[], coupes: number[]): number[] {
   return out;
 }
 
-/** Une personne (ou un animal) vue sur une image. `x` : où la suivre (sa tête si on la voit, sinon son corps). */
-type Vue = { t: number; x: number; tete?: { x: number; y: number; h: number }; corps: { x: number; y: number; w: number; h: number }; taille: number; geste: number; bouche: number };
-
-/** Les personnes d'une image : chaque visage est rattaché au corps qui le porte ; un visage sans corps détecté (gros
- *  plan) devient une personne à part entière. */
-function vuesDe(e: Echantillon): Vue[] {
-  const corps = (e.c ?? []).filter((c) => c[4] >= 0.35 && c[3] >= 0.08);
-  const libres = new Set(corps.map((_, i) => i));
-  const out: Vue[] = [];
-  for (const [x, y, w, h, conf, bouche = 0] of e.f) {
-    if (conf < 0.5 || w < 0.012) continue;
-    // Le corps qui contient ce visage dans son haut ; le plus petit, s'il y en a plusieurs.
-    const i = [...libres].filter((j) => { const c = corps[j]; return Math.abs(x - c[0]) < c[2] / 2 && y > c[1] - c[3] / 2 - h && y < c[1] - c[3] / 2 + c[3] * 0.5; })
-      .sort((p, q) => corps[p][2] * corps[p][3] - corps[q][2] * corps[q][3])[0];
-    const c = i !== undefined ? corps[i] : undefined;
-    if (i !== undefined) libres.delete(i);
-    const k = c ? { x: c[0], y: c[1], w: c[2], h: c[3] } : { x, y: Math.min(1, y + h * 2), w: Math.min(1, w * 3), h: Math.min(1, h * 5) };
-    out.push({ t: e.t, x, tete: { x, y, h }, corps: k, taille: Math.min(1, Math.max(k.h, h * 4)), geste: c?.[6] ?? 0, bouche });
-  }
-  for (const i of libres) {
-    const c = corps[i];
-    out.push({ t: e.t, x: c[0], corps: { x: c[0], y: c[1], w: c[2], h: c[3] }, taille: c[3], geste: c[6] ?? 0, bouche: 0 });
-  }
-  return out;
-}
-
-/** Une personne suivie pendant un plan. */
-type Piste = { vues: Vue[]; taille: number; presence: number };
-
-/** Suit les personnes d'une image à l'autre : même place, taille proche. */
-function pistes(ech: Echantillon[]): Piste[] {
-  const ps: Piste[] = [];
-  for (const e of ech) {
-    const prises = new Set<Piste>();
-    for (const v of vuesDe(e).sort((a, b) => b.taille - a.taille)) {
-      const p = ps.filter((q) => !prises.has(q)).map((q) => ({ q, d: Math.abs(q.vues.at(-1)!.x - v.x), r: q.vues.at(-1)!.taille / v.taille, dt: v.t - q.vues.at(-1)!.t }))
-        .filter((o) => o.dt < 1 && o.d < Math.max(0.1, v.corps.w * 0.6) && o.r > 0.55 && o.r < 1.8).sort((a, b) => a.d - b.d)[0]?.q;
-      if (p) { p.vues.push(v); prises.add(p); } else { const n = { vues: [v], taille: 0, presence: 0 }; ps.push(n); prises.add(n); }
-    }
-  }
-  for (const p of ps) { p.taille = mediane(p.vues.map((v) => v.taille)); p.presence = p.vues.length / Math.max(1, ech.length); }
-  return ps;
-}
-
-/** Les positions du cadre sur une personne pendant [a, b] : fixe si elle bouge peu, sinon il la suit en douceur. */
-function cadrer(p: Piste, a: number, b: number, mode: "tete" | "corps"): Cle[] {
-  const vues = p.vues.filter((v) => v.t >= a - 0.2 && v.t <= b + 0.2);
-  // Plan corps : le milieu du corps, sans que la tête s'éloigne du centre (le cadre couvre un tiers de la largeur).
-  const pos = (v: Vue) => mode === "tete" && v.tete ? { x: v.tete.x, y: v.tete.y }
-    : { x: v.tete ? Math.min(v.tete.x + 0.09, Math.max(v.tete.x - 0.09, v.corps.x)) : v.corps.x, y: 0.5 };
-  const xs = vues.map((v) => pos(v).x), ys = vues.map((v) => pos(v).y);
-  if (!vues.length) return [{ t: a, x: 0.5, y: 0.5, x2: 0.5, y2: 0.5 }];
-  if (Math.max(...xs) - Math.min(...xs) < 0.06 && Math.max(...ys) - Math.min(...ys) < 0.06) {
-    const x = mediane(xs), y = mediane(ys);
-    return [{ t: a, x, y, x2: x, y2: y }];
-  }
-  const out: Cle[] = [];
-  for (let t = a; t < b; t += 0.5) {
-    const proches = vues.filter((v) => Math.abs(v.t - t) <= 0.5);
-    if (proches.length) { const x = mediane(proches.map((v) => pos(v).x)), y = mediane(proches.map((v) => pos(v).y)); out.push({ t, x, y, x2: x, y2: y }); }
-  }
-  if (out.length) out[0].t = a;
-  return out.length ? out : [{ t: a, x: mediane(xs), y: mediane(ys), x2: mediane(xs), y2: mediane(ys) }];
-}
-
-/** Le plan d'une personne pendant [a, b] : la tête si elle parle sans bouger et qu'on voit son visage d'assez loin
- *  pour zoomer ; sinon le corps entier. */
-function planDe(p: Piste, a: number, b: number): Morceau {
-  const vues = p.vues.filter((v) => v.t >= a && v.t <= b);
-  const tetes = vues.filter((v) => v.tete);
-  const geste = moyenne(vues.map((v) => v.geste));
-  // Zoomer sur une tête déjà grande ferait un plan trop serré (et flou) : le plan corps la cadre déjà de près.
-  const mode = tetes.length >= vues.length * 0.5 && geste < GESTE && mediane(tetes.map((v) => v.tete!.h)) < 0.2 ? "tete" : "corps";
-  return { a, b, mode, cles: cadrer(p, a, b, mode) };
-}
-
-/** Un grand geste : le corps bouge nettement d'une image à l'autre (mesuré sur ~70 ms). */
-const GESTE = 0.025;
-
 /** Les morceaux du passage (durée `len`). Tout est en secondes depuis le début du passage : `coupes`, les vrais
  *  changements de plan ; `phrases`, les débuts de phrase ; `vu`, ce que voit et entend le détecteur. */
 export function morceaux(plans: Plan[], len: number, coupes: number[], phrases: number[], vu: Echantillon[]): Morceau[] {
@@ -148,133 +68,100 @@ export function morceaux(plans: Plan[], len: number, coupes: number[], phrases: 
   const seuilVoix = sons.length ? mediane(sons) * 0.5 : 0;
   const out: Morceau[] = [];
   for (let i = 0; i < bords.length - 1; i++) {
-    const a = bords[i], b = bords[i + 1];
-    if (b - a < 0.05) continue;
-    for (const m of plan(a, b)) {
+    if (bords[i + 1] - bords[i] < 0.05) continue;
+    for (const m of plan(bords[i], bords[i + 1])) {
       const prev = out.at(-1);
-      // Un plan de la caméra minuscule (un flash de montage) garde le cadre du précédent.
-      if (prev && m.b - m.a < 0.3) prev.b = m.b; else out.push(m);
+      // Même zone que juste avant, ou un plan minuscule (un flash de montage) : on prolonge.
+      if (prev && (prev.mode === m.mode || m.b - m.a < 0.3)) prev.b = m.b; else out.push(m);
     }
   }
-  if (out.length > 1 && out[0].b - out[0].a < 0.3) { out[1].a = 0; out[1].cles[0].t = 0; out.shift(); }
-  return out.map((m) => ({ ...m, a: round(m.a), b: round(m.b), cles: m.cles.map((k) => ({ t: round(k.t), x: round(k.x, 1000), y: round(k.y, 1000), x2: round(k.x2, 1000), y2: round(k.y2, 1000) })) }));
+  return out.map((m) => ({ ...m, a: round(m.a), b: round(m.b) }));
 
-  /** Un plan de la caméra [a, b] : qui prend le cadre, et quand ça change. */
+  /** Un plan de la caméra [a, b] : quelle zone, et quand ça change. */
   function plan(a: number, b: number): Morceau[] {
     const ech = vu.filter((e) => e.t >= a && e.t < b);
-    const ps = pistes(ech);
-    const grand = Math.max(0, ...ps.filter((p) => p.presence >= 0.3).map((p) => p.taille));
-    // Ceux qui comptent : présents la plupart du temps, et pas le public du fond (bien plus petit que les principaux).
-    const actifs = ps.filter((p) => p.presence >= 0.3 && p.taille >= grand * 0.5);
-    const g = plans.filter((p) => p.t <= (a + b) / 2 + 0.5).at(-1);
-    if (!actifs.length) {
-      // Personne de détecté : Gemini voit quand même quelqu'un (de dos, très loin) ? On cadre là où il le dit.
-      if (g?.mode === "un") return [{ a, b, mode: "corps", cles: [{ t: a, x: g.x, y: 0.5, x2: g.x, y2: 0.5 }] }];
-      if (g?.mode === "duo") return [{ a, b, mode: "duo", cles: [{ t: a, x: Math.min(g.x, g.x2!), y: 0.4, x2: Math.max(g.x, g.x2!), y2: 0.4 }] }];
-      return [{ a, b, mode: "flou", cles: [{ t: a, x: 0.5, y: 0.5, x2: 0.5, y2: 0.5 }] }];
+    const visages = (e: Echantillon) => e.f.filter((f) => f[4] >= 0.5 && f[2] >= 0.012);
+    // Les côtés où il y a quelqu'un d'important (pas le public du fond : un visage bien plus petit que les autres).
+    const grand = Math.max(0, ...ech.flatMap((e) => visages(e).map((f) => f[3])));
+    const presents = new Set(ech.flatMap((e) => visages(e).filter((f) => f[3] >= grand * 0.5).map((f) => coteDe(f[0]))));
+    // Aucun visage (de profil, de dos, trop loin) : le côté du plus grand corps, présent au moins un tiers du plan.
+    if (!presents.size) {
+      const corps = ech.flatMap((e) => (e.c ?? []).filter((c) => c[4] >= 0.35 && c[5] === 0));
+      const haut = Math.max(0, ...corps.map((c) => c[3]));
+      const parCote = new Map<string, number>();
+      for (const c of corps.filter((c) => c[3] >= haut * 0.7)) parCote.set(coteDe(c[0]), (parCote.get(coteDe(c[0])) ?? 0) + 1);
+      const [cote, n] = [...parCote].sort((p, q) => q[1] - p[1])[0] ?? [];
+      if (cote && n >= ech.length / 3) presents.add(cote as "gauche" | "centre" | "droite");
     }
-    // La note de chaque personne, toutes les demi-secondes : parle (sa bouche bouge pendant qu'on entend une voix),
-    // fait de grands gestes, est près de la caméra. Absente de l'image : elle ne peut pas avoir le cadre.
-    const fen: number[] = [];
-    for (let t = a; t < b - 0.05; t += 0.5) fen.push(t);
-    const mesures = fen.map((t) => {
-      const voix = moyenne(ech.filter((e) => e.t >= t && e.t < t + 0.5).map((e) => e.voix ?? 0)) > seuilVoix;
-      return actifs.map((p) => {
-        const v = p.vues.filter((x) => x.t >= t && x.t < t + 0.5);
-        return v.length ? { parle: moyenne(v.map((x) => x.bouche)) * (voix ? 1 : 0.2), geste: moyenne(v.map((x) => x.geste)) } : null;
-      });
-    });
-    const maxParle = Math.max(0, ...mesures.flat().map((m) => m?.parle ?? 0));
-    // Gemini ne sert qu'à départager : un petit bonus à la personne qu'il désigne vraiment (pas « au milieu »).
-    const designe = (t: number) => { const p = plans.filter((x) => x.t <= t + 0.25).at(-1); return p?.mode === "un" && Math.abs(p.x - 0.5) > 0.1 ? p.x : null; };
-    const notes = mesures.map((ms, k) => ms.map((m, j) => {
-      if (!m) return -Infinity;
-      const d = designe(fen[k]), p = actifs[j];
-      return (maxParle > 0.004 ? 3 * m.parle / maxParle : 0) + 2 * Math.min(1, m.geste / (GESTE * 1.6)) + p.taille / grand
-        + (d !== null && Math.abs(p.vues[0].x - d) < 0.12 ? 0.7 : 0);
-    }));
-    // Qui a le cadre : la meilleure note, mais on ne change qu'après 1,5 s d'avance (pas de ping-pong), au début de la
-    // phrase la plus proche.
-    const meilleur = notes.map((ns) => ns.indexOf(Math.max(...ns)));
-    const tours: { t: number; j: number }[] = [{ t: a, j: meilleur[0] }];
-    for (let k = 1; k < meilleur.length; k++) {
-      const j = meilleur[k], cur = tours.at(-1)!.j;
-      if (j === cur) continue;
-      // 1,5 s d'avance, ou la personne qui avait le cadre a quitté l'image depuis 1 s.
-      const suite = meilleur.slice(k, k + 3);
-      const tient = (suite.length === 3 && suite.every((x) => x === j)) || (notes[k][cur] === -Infinity && notes[k + 1]?.[cur] === -Infinity);
-      if (!tient) continue;
-      const t0 = fen[k];
-      const t = phrases.filter((p) => Math.abs(p - t0) <= 0.8 && p > tours.at(-1)!.t + 1 && p < b - 0.5).sort((p, q) => Math.abs(p - t0) - Math.abs(q - t0))[0] ?? t0;
-      tours.push({ t, j });
+    // Personne ne parle clairement : la zone où sont les gens (les deux côtés : haut et bas), sinon le centre.
+    const parDefaut: Zone = presents.size === 1 ? [...presents][0] : presents.has("gauche") && presents.has("droite") ? "duo" : "centre";
+    // Toutes les demi-secondes : qui parle, de quel côté.
+    const fen: { t: number; zone: Zone | null }[] = [];
+    const parle: Record<string, number>[] = [];
+    for (let t = a; t < b - 0.05; t += 0.5) {
+      const dans = ech.filter((e) => e.t >= t && e.t < t + 0.5);
+      const voix = moyenne(dans.map((e) => e.voix ?? 0)) > seuilVoix;
+      const p: Record<string, number> = { gauche: 0, centre: 0, droite: 0 };
+      if (voix) for (const e of dans) for (const f of visages(e)) if (f[3] >= grand * 0.5) p[coteDe(f[0])] += (f[5] ?? 0) / dans.length;
+      parle.push(p);
+      fen.push({ t, zone: null });
     }
-    // Deux personnes éloignées qui se répondent très vite (au moins 3 tours de moins de 3 s) : écran coupé.
-    const ms: Morceau[] = [];
-    for (let k = 0; k < tours.length; k++) {
-      const s = tours[k].t, e = tours[k + 1]?.t ?? b;
-      const prev = ms.at(-1);
-      const p = actifs[tours[k].j];
-      if (prev && prev.mode !== "duo" && k >= 2 && e - s < 3 && tours[k - 2].j === tours[k].j && tours[k - 1].t - tours[k - 2].t < 3) {
-        const q = actifs[tours[k - 1].j];
-        if (Math.abs(p.vues[0].x - q.vues[0].x) >= 0.3) {
-          const [h, bas] = [p, q].sort((u, w) => mediane(u.vues.map((v) => v.x)) - mediane(w.vues.map((v) => v.x)));
-          const hy = mediane(h.vues.filter((v) => v.tete).map((v) => v.tete!.y)) || 0.4, by = mediane(bas.vues.filter((v) => v.tete).map((v) => v.tete!.y)) || 0.4;
-          // Les deux derniers tours deviennent un seul écran coupé.
-          ms.pop();
-          const debut = ms.at(-1)?.b ?? tours[k - 1].t;
-          ms.push({ a: debut, b: e, mode: "duo", cles: [{ t: debut, x: mediane(h.vues.map((v) => v.x)), y: hy, x2: mediane(bas.vues.map((v) => v.x)), y2: by }] });
-          continue;
-        }
+    const max = Math.max(0, ...parle.flatMap((p) => Object.values(p)));
+    parle.forEach((p, k) => {
+      const meilleur = Math.max(...Object.values(p));
+      if (meilleur < Math.max(0.004, max * 0.35)) {
+        // Personne ne parle et une seule personne à l'image : la zone suit le côté où elle est (si elle se déplace).
+        const dans = ech.filter((e) => e.t >= fen[k].t && e.t < fen[k].t + 0.5);
+        const cotes = new Set(dans.flatMap((e) => visages(e).filter((f) => f[3] >= grand * 0.5).map((f) => coteDe(f[0]))));
+        if (cotes.size === 1 && dans.every((e) => visages(e).filter((f) => f[3] >= grand * 0.5).length <= 1)) fen[k].zone = [...cotes][0];
+        return;
       }
-      if (prev?.mode === "duo" && e - s < 3 && prev.b === s) { prev.b = e; continue; }
-      ms.push(planDe(p, s, e));
-    }
-    return ms;
-  }
-}
-
-/** Une valeur qui change avec le temps, en expression FFmpeg évaluée à chaque image (t = temps du Short) : fixe dans un
- *  morceau, ou qui glisse d'une position à la suivante quand le cadre suit quelqu'un. */
-function selon(ms: Morceau[], v: (k: Cle) => number): string {
-  const bouts: { a: number; b: number; va: number; vb: number }[] = [];
-  for (const m of ms) {
-    m.cles.forEach((k, i) => {
-      const s = m.cles[i + 1];
-      bouts.push({ a: k.t, b: s ? s.t : m.b, va: v(k), vb: s ? v(s) : v(k) });
+      const actifs = (Object.keys(p) as ("gauche" | "centre" | "droite")[]).filter((z) => p[z] >= meilleur * 0.5);
+      fen[k].zone = actifs.includes("gauche") && actifs.includes("droite") ? "duo" : actifs.sort((x, y) => p[y] - p[x])[0];
     });
+    // On ne change de zone qu'après 1,5 s (pas de ping-pong), au début de la phrase la plus proche.
+    const premier = fen.find((f) => f.zone)?.zone ?? parDefaut;
+    const tours: Morceau[] = [{ a, b, mode: premier }];
+    for (let k = 1; k < fen.length; k++) {
+      const z = fen[k].zone, cur = tours.at(-1)!;
+      if (!z || z === cur.mode) continue;
+      const suite = fen.slice(k, k + 3);
+      if (suite.length < 3 || !suite.every((f) => f.zone === z || f.zone === null) || suite.filter((f) => f.zone === z).length < 2) continue;
+      const t0 = fen[k].t;
+      // Le premier choix du plan est contredit dès la première seconde : c'était le mauvais, on le corrige.
+      if (tours.length === 1 && t0 - a < 1.2) { cur.mode = z; continue; }
+      const t = phrases.filter((p) => Math.abs(p - t0) <= 0.8 && p > cur.a + 1 && p < b - 0.5).sort((p, q) => Math.abs(p - t0) - Math.abs(q - t0))[0] ?? t0;
+      cur.b = t;
+      tours.push({ a: t, b, mode: z });
+    }
+    // Gauche et droite qui se répondent très vite (moins de 3 s chacun) : les deux en même temps, en haut et en bas.
+    for (let k = 1; k < tours.length - 1; k++) {
+      const [p, c, n] = [tours[k - 1], tours[k], tours[k + 1]];
+      const echange = new Set([p.mode, c.mode, n.mode]);
+      if (c.b - c.a < 3 && p.mode === n.mode && echange.has("gauche") && echange.has("droite")) { p.mode = "duo"; c.mode = "duo"; n.mode = "duo"; }
+    }
+    // Personne de détecté de tout le plan : Gemini voit peut-être quelqu'un sur un côté.
+    const g = plans.filter((x) => x.t <= (a + b) / 2 + 0.5).at(-1);
+    if (!presents.size && g?.mode === "un") return [{ a, b, mode: coteDe(g.x) }];
+    return tours;
   }
-  const f = (n: number) => n.toFixed(3);
-  const val = (o: (typeof bouts)[0]) => (Math.abs(o.vb - o.va) < 0.002 ? f(o.va) : `${f(o.va)}+${f(o.vb - o.va)}*(t-${o.a})/${round(o.b - o.a)}`);
-  // Une somme à plat (« pendant ce bout, cette valeur » + …) : FFmpeg refuse les « si » imbriqués trop profondément.
-  // Le premier et le dernier bout s'étendent au-delà, pour couvrir chaque image.
-  return bouts.map((o, i) => `gte(t\\,${i ? o.a : -1e6})*lt(t\\,${i < bouts.length - 1 ? o.b : 1e6})*(${val(o)})`).join("+");
 }
-/** Vrai (1) pendant les morceaux d'un mode, en expression FFmpeg. */
-const pendantMode = (ms: Morceau[], mode: Morceau["mode"]) => ms.filter((m) => m.mode === mode).map((m) => `between(t\\,${m.a}\\,${round(m.b - 0.001, 1000)})`).join("+") || "0";
 
-/** Le filtre FFmpeg du montage auto, sortie 1080×1920. Les quatre mises en page sont calculées en continu (rien
- *  n'est gardé en mémoire) et on affiche, à chaque image, celle du morceau en cours. */
+/** Le filtre FFmpeg du montage auto, sortie 1080×1920. Deux mises en page calculées en continu (rien n'est gardé en
+ *  mémoire) : plein écran (sa position change selon la zone) et haut/bas ; on affiche celle du morceau en cours. */
 export function filtreMontage(ms: Morceau[]): string {
-  // La personne au centre du cadre, sans sortir de l'image : x = sa position × largeur − la moitié du cadre.
-  const centre = (e: string) => `max(0\\,min(iw-ow\\,(${e})*iw-ow/2))`;
-  // Le visage placé à une hauteur donnée du cadre (`haut` : 0,36 = un peu au-dessus du tiers).
-  const hauteur = (e: string, haut: number) => `max(0\\,min(ih-oh\\,(${e})*ih-oh*${haut}))`;
-  const x = selon(ms, (k) => k.x), y = selon(ms, (k) => k.y);
-  // Duo : chaque moitié (1080×960) zoome sur une personne, son visage un peu au-dessus du milieu.
-  const moitie = (cx: string, cy: string, nom: string) => `crop=w=ih*0.62*9/8:h=ih*0.62:x=${centre(cx)}:y=${hauteur(cy, 0.42)},scale=1080:960,setsar=1[${nom}]`;
+  // Plein écran : la bande verticale centrée sur la zone, sans sortir de l'image. Une somme à plat (« pendant ce
+  // morceau, cette position » + …) : FFmpeg refuse les « si » imbriqués trop profondément.
+  const x = ms.filter((m) => m.mode !== "duo").map((m, i, l) => `gte(t\\,${i ? m.a : -1e6})*lt(t\\,${i < l.length - 1 ? m.b : 1e6})*${CENTRES[m.mode as keyof typeof CENTRES]}`).join("+") || "0.5";
+  const duo = ms.filter((m) => m.mode === "duo").map((m) => `between(t\\,${m.a}\\,${round(m.b - 0.001, 1000)})`).join("+") || "0";
+  // Haut/bas : chaque moitié de l'image (gauche en haut, droite en bas), un peu rognée en hauteur pour faire 1080×960.
+  const moitie = (cote: 0 | 1, nom: string) => `crop=w=min(iw/2\\,ih*9/8):h=min(iw/2\\,ih*9/8)*8/9:x=${cote ? "iw-ow" : "0"}:y=(ih-oh)*0.35,scale=1080:960,setsar=1[${nom}]`;
   return [
-    "[0:v]fps=30,split=6[s0][s1][s2][s3][s4][s5]",
-    "[s0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=30:2,eq=brightness=-0.12[fond]",
-    "[s1]scale=1080:-2[milieu]",
-    "[fond][milieu]overlay=(W-w)/2:(H-h)/2,setsar=1[flou]",
-    `[s2]crop=w=min(iw\\,ih*9/16):h=ih:x=${centre(x)},scale=1080:1920,setsar=1[corps]`,
-    // Plan tête : deux tiers de la hauteur de l'image, le visage au tiers du cadre.
-    `[s3]crop=w=ih*0.66*9/16:h=ih*0.66:x=${centre(x)}:y=${hauteur(y, 0.36)},scale=1080:1920,setsar=1[tete]`,
-    `[s4]${moitie(x, y, "haut")}`,
-    `[s5]${moitie(selon(ms, (k) => k.x2), selon(ms, (k) => k.y2), "bas")}`,
+    "[0:v]fps=30,split=3[s0][s1][s2]",
+    `[s0]crop=w=min(iw\\,ih*9/16):h=ih:x=max(0\\,min(iw-ow\\,(${x})*iw-ow/2)),scale=1080:1920,setsar=1[plein]`,
+    `[s1]${moitie(0, "haut")}`,
+    `[s2]${moitie(1, "bas")}`,
     "[haut][bas]vstack[duo]",
-    `[flou][corps]overlay=enable=${pendantMode(ms, "corps")}[t1]`,
-    `[t1][tete]overlay=enable=${pendantMode(ms, "tete")}[t2]`,
-    `[t2][duo]overlay=enable=${pendantMode(ms, "duo")},setsar=1[vout]`,
+    `[plein][duo]overlay=enable=${duo},setsar=1[vout]`,
   ].join(";");
 }
