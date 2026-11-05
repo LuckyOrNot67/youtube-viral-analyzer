@@ -5,7 +5,9 @@ import { logCost } from "./events";
 import LIMITES from "@/config/limites.json";
 
 // Clés dans .env.local uniquement, jamais envoyées au navigateur.
-export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
+/** Claude ne regarde pas la vidéo : il lit les résumés de Gemini et écrit note, titre, légende et hashtags.
+ *  Haiku, le plus petit modèle, suffit (≈ 20 fois moins cher que Sonnet). */
+export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-haiku-5-5";
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
 /** Images regardées par seconde de vidéo. Par défaut Gemini en prend environ 1 ; à 0,5, une vidéo de 30 min passe de
  *  ~103 k à ~66 k jetons, mêmes passages trouvés aux mêmes minutages (mesuré sur 4MphCDK8fWg). Le son reste entier. */

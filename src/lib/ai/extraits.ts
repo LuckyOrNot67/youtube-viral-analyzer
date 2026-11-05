@@ -11,7 +11,8 @@ import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
 
 // Meilleurs passages d'une vidéo longue : 1) moments cités en commentaires, 2) Gemini regarde la vidéo par son
-// lien et propose des candidats minutés, 3) Claude note chaque candidat pour un Short, 4) contrôles sans IA.
+// lien et propose des candidats minutés, 3) Claude (Haiku) lit leurs résumés et écrit la note, le titre, la légende et
+// les hashtags de chaque Short, 4) contrôles sans IA.
 
 export const DUREE_MAX_VIDEO = 3 * 3600;
 /** Un grand choix pour que chaque groupe de personnes reçoive des passages différents : environ un toutes les 2 min. */
@@ -43,9 +44,9 @@ const Notes = z.object({
   notes: z.array(z.object({
     index: z.number().int(),
     scoreShorts: z.number().describe("0 à 10 : force du début, compréhension seule, densité, émotion, chute claire, durée, adapté au vertical"),
-    titre: z.string().describe("Titre court du Short, 6 mots maximum"),
-    hook: z.string().describe("Phrase d'accroche à écrire ou dire dans les 2 premières secondes, 10 mots maximum, sans promettre de vues"),
-    justification: z.string().describe("Pourquoi ce passage marche en format court, une phrase, en s'appuyant sur le résumé"),
+    titre: z.string().describe("Texte affiché sur la couverture du Short : accrocheur, 8 mots maximum, sans promettre de vues"),
+    description: z.string().describe("Légende à poster sous le Short sur TikTok : 1 à 2 phrases qui donnent envie de regarder, sans hashtag"),
+    hashtags: z.array(z.string()).describe("3 à 6 hashtags pertinents, avec le #, tirés du sujet et des mots-clés de la vidéo"),
   })),
 });
 
@@ -93,9 +94,9 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
     const res = await claude(v.id).messages.parse({
       model: CLAUDE_MODEL,
       max_tokens: 10000,
-      system: "Tu notes des passages de vidéos YouTube pour en faire des Shorts. Tu écris en français. Tu t'appuies uniquement sur les descriptions fournies, tu ne promets jamais de vues.",
-      messages: [{ role: "user", content: `Vidéo : « ${v.title} » (${v.channelTitle}).\n\nPassages candidats :\n${ok.map((c, i) =>
-        `${i}. ${fmtTime(c.start)} → ${fmtTime(c.end)} (${c.end - c.start} s), ${c.type}. Début : « ${c.premiere_phrase} ». ${c.resume}${citationsIn(moments, c.start, c.end) ? ` Cité ${citationsIn(moments, c.start, c.end)} fois dans les commentaires.` : ""}`).join("\n")}\n\nNote chaque passage.` }],
+      system: "Tu prépares des Shorts à partir de passages de vidéos YouTube. Pour chacun : une note, un titre de couverture, une légende et des hashtags. Tu écris en français. Tu t'appuies uniquement sur ce qui est fourni, tu ne promets jamais de vues.",
+      messages: [{ role: "user", content: `Vidéo : « ${v.title} » (${v.channelTitle}).${v.tags?.length ? `\nMots-clés YouTube : ${v.tags.join(", ")}.` : ""}${v.description ? `\nDescription YouTube (début) : ${v.description.replace(/\s+/g, " ").slice(0, 400)}` : ""}\n\nPassages candidats :\n${ok.map((c, i) =>
+        `${i}. ${fmtTime(c.start)} → ${fmtTime(c.end)} (${c.end - c.start} s), ${c.type}. Début : « ${c.premiere_phrase} ». ${c.resume}${citationsIn(moments, c.start, c.end) ? ` Cité ${citationsIn(moments, c.start, c.end)} fois dans les commentaires.` : ""}`).join("\n")}\n\nPrépare chaque passage.` }],
       output_config: { format: zodOutputFormat(Notes) },
     });
     notes = res.parsed_output?.notes ?? [];
@@ -106,7 +107,7 @@ async function compute(v: Video, onEtape: (e: Etape) => void): Promise<ExtraitsR
     const citations = citationsIn(moments, c.start, c.end);
     return {
       start: c.start, end: c.end, type: c.type, resume: c.resume,
-      titre: n?.titre ?? c.resume.slice(0, 60), hook: n?.hook ?? c.premiere_phrase, justification: n?.justification ?? "",
+      titre: n?.titre ?? c.premiere_phrase, description: n?.description ?? c.resume, hashtags: (n?.hashtags ?? []).map((h) => (h.startsWith("#") ? h : `#${h}`).replace(/\s+/g, "")),
       // Un passage que les spectateurs citent eux-mêmes gagne un petit bonus (preuve réelle d'intérêt).
       scoreShorts: Math.round(Math.min(10, (n?.scoreShorts ?? 5) + Math.min(1, citations * 0.25)) * 10) / 10,
       citations,

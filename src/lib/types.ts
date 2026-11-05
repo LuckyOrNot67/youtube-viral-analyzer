@@ -73,10 +73,15 @@ export type Extrait = {
   start: number;
   end: number;
   type: string;
+  /** Texte affiché sur la couverture, court et accrocheur. */
   titre: string;
-  hook: string;
+  /** Légende à poster avec le Short (absente des analyses d'avant le 5 novembre 2026). */
+  description?: string;
+  /** Hashtags à poster, avec le # (absents des analyses d'avant le 5 novembre 2026). */
+  hashtags?: string[];
+  /** Ancien texte de couverture, remplacé par `titre`. */
+  hook?: string;
   resume: string;
-  justification: string;
   scoreShorts: number;
   /** Nombre de commentaires qui citent ce moment. */
   citations: number;

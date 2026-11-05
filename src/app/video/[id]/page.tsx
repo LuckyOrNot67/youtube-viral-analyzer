@@ -148,7 +148,8 @@ function Crit({ label, p }: { label: string; p: number }) {
   );
 }
 
-type Passage = { start: number; end: number; hook: string; titre: string; note: number | null };
+/** `couverture` : le texte affiché sur la couverture ; `legende` : la description et les hashtags à poster. */
+type Passage = { start: number; end: number; couverture: string; titre: string; legende: string | null; note: number | null };
 
 type Sorte = "shorts" | "histoires";
 
@@ -242,8 +243,9 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   // Les passages de l'IA, sinon les moments cités dans les commentaires (45 s autour).
   const passages: Passage[] = res
     ? res.extraits.length
-      ? res.extraits.map((x) => ({ start: x.start, end: x.end, hook: x.hook, titre: x.titre, note: x.scoreShorts }))
-      : res.moments.map((m) => ({ start: Math.max(0, m.t - 3), end: Math.min(video.duration, m.t + 42), hook: m.exemples[0], titre: m.exemples[0], note: null }))
+      ? res.extraits.map((x) => ({ start: x.start, end: x.end, couverture: x.hook ?? x.titre, titre: x.titre, note: x.scoreShorts,
+          legende: x.description ? [x.description, (x.hashtags ?? []).join(" ")].filter(Boolean).join("\n\n") : null }))
+      : res.moments.map((m) => ({ start: Math.max(0, m.t - 3), end: Math.min(video.duration, m.t + 42), couverture: m.exemples[0], titre: m.exemples[0], legende: null, note: null }))
     : [];
 
   return (
@@ -272,11 +274,11 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
             {passages.map((x, i) => (
               <div key={`${x.start}-${x.end}`} className={`cover-col${made.has(i) ? " wide" : ""}`}>
                 {made.has(i)
-                  ? <ExportShort videoId={video.id} start={x.start} end={x.end} titre={x.titre} />
+                  ? <ExportShort videoId={video.id} start={x.start} end={x.end} titre={x.titre} legende={x.legende} />
                   : <>
                       <Cover videoId={video.id} decale={DECALAGES[i % DECALAGES.length]} actif={vu === i} onClick={() => { setVu(i); onSeek(x.start, x.end); }}
                         haut={<><span className="tc">{fmtDur(x.start)}</span>{x.note !== null && <span className="stk lime">{fmtScore(x.note)}<small>/10</small></span>}</>}
-                        titre={x.hook} bas={<span className="tc">{fmtDur(x.end - x.start)}</span>} />
+                        titre={x.couverture} bas={<span className="tc">{fmtDur(x.end - x.start)}</span>} />
                       <button className="btn sm" onClick={() => setMade(new Set(made).add(i))}><Scissors size={15} /> Créer</button>
                     </>}
               </div>
@@ -293,7 +295,7 @@ type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur";
 type PartieDe = { partie: number; start: number; end: number };
 
 /** Lance le Short dès l'ouverture : plein écran, sans bandes floues ; l'image entière reste au choix. */
-function ExportShort({ videoId, start, end, titre, histoire, onFin }: { videoId: string; start: number; end: number; titre: string; histoire?: PartieDe; onFin?: () => void }) {
+function ExportShort({ videoId, start, end, titre, legende, histoire, onFin }: { videoId: string; start: number; end: number; titre: string; legende?: string | null; histoire?: PartieDe; onFin?: () => void }) {
   const [job, setJob] = useState<{ id: string; j: Job } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const fini = !!err || job?.j.etat === "pret" || job?.j.etat === "erreur";
@@ -332,7 +334,21 @@ function ExportShort({ videoId, start, end, titre, histoire, onFin }: { videoId:
       <video src={`/api/short/${job.id}?fichier=1`} controls playsInline />
       <div className="col">
         <a className="btn lime" href={`/api/short/${job.id}?fichier=1&telecharger=1`} download><Download size={18} /> Télécharger</a>
+        {legende && <Legende texte={legende} />}
       </div>
+    </div>
+  );
+}
+
+/** La légende à poster (description et hashtags), à copier d'un clic. */
+function Legende({ texte }: { texte: string }) {
+  const [copie, setCopie] = useState(false);
+  const copier = () => navigator.clipboard.writeText(texte).then(() => { setCopie(true); setTimeout(() => setCopie(false), 1500); }).catch(() => {});
+  return (
+    <div className="legende">
+      <span className="mono dim">Légende à poster</span>
+      <p>{texte}</p>
+      <button className="btn ghost sm" onClick={copier}>{copie ? "Copiée" : "Copier la légende"}</button>
     </div>
   );
 }
