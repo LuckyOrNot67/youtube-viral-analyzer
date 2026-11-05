@@ -106,7 +106,7 @@ export default function VideoPage() {
         <summary>Comment c&apos;est calculé</summary>
         <div className="card col" style={{ gap: 10, marginTop: 8 }}>
           {(s.points ?? []).map((p) => <Crit key={p.critere} label={p.critere} detail={p.detail} pts={p.points} />)}
-          <div className="crit total"><span>Total</span><span /><span className="p">{fmtScore(s.score)}/10</span></div>
+          <div className="crit total"><span>Total</span><span className="dim">{s.totalPoints !== undefined ? `${fmtScore(s.totalPoints)} points, ramenés à une note sur 10` : ""}</span><span className="p">{fmtScore(s.score)}/10</span></div>
           <p className="small"><Conf c={s.confiance} />{s.confianceRaison ? ` : ${s.confianceRaison}` : ""}</p>
         </div>
       </details>

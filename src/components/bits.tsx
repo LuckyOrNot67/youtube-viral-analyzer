@@ -29,7 +29,7 @@ export const fmtAge = (days: number) => {
 export const fmtScore = (s: number) => s.toFixed(1).replace(".", ",");
 
 export function ScoreBadge({ score, big }: { score: number; big?: boolean }) {
-  const tone = score >= 8 ? "s-hot" : score >= 6.5 ? "s-up" : score >= 5 ? "s-mid" : "s-low";
+  const tone = score >= 9 ? "s-hot" : score >= 8 ? "s-up" : score >= 6.5 ? "s-mid" : "s-low";
   return <span className={`score ${tone}${big ? " big" : ""}`}>{fmtScore(score)}<small>/10</small></span>;
 }
 

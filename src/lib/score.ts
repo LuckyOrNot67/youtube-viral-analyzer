@@ -6,7 +6,8 @@
 //   - Likes (0 à +0,5) et commentaires (0 à +0,25) : un petit coup de pouce, par vue, comparés à la chaîne. Jamais de malus : une vidéo
 //     qui devient virale touche des gens qui ne likent pas, son taux baisse justement parce qu'elle marche.
 //   - Fraîcheur (−1 à +2) : une vidéo récente compte plus ; au-delà d'un an, elle ne peut plus être en tête.
-// Le total est ramené entre 0 et 10.
+// Les points sont ensuite transformés en note sur 10 qui monte vite puis plafonne : les vidéos qui marchent vraiment
+// s'étalent de 8,5 à 9,8, les moyennes autour de 7, les flops sous 5. Le classement ne change pas, seule l'échelle.
 
 import type { Confiance, Score, Video } from "./types";
 
@@ -72,6 +73,9 @@ export function pointsHabitude(r: number): number {
 /** Likes ou commentaires par vue, comparés à la chaîne : +20 % → le bonus entier (multiplié par son plafond), sinon 0. */
 const pointsTaux = (r: number) => (r >= 1.2 ? 1 : 0);
 
+/** Points (0 à ~10,75) → note sur 10 : 2 → 5,1 ; 4 → 7,6 ; 6 → 8,8 ; 8 → 9,4 ; 10,75 → 9,8. Jamais 10. */
+export const noteSur10 = (pts: number) => 10 * (1 - Math.exp(-Math.max(0, pts) / 2.8));
+
 export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?: Snapshot[]; subs?: number | null }): Score {
   const { now } = opts;
   const age = ageDays(v, now);
@@ -107,7 +111,8 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
   const fraicheur = age <= 7 ? 2 : age <= 31 ? 1.5 : age <= 92 ? 1 : age <= 183 ? 0.5 : age <= 366 ? 0 : -1;
   points.push({ critere: "Fraîcheur", points: fraicheur, detail: `publiée ${age < 1 ? "aujourd'hui" : `il y a ${fmtJours(age)}`}` });
 
-  let score = clamp(points.reduce((t, p) => t + p.points, 0), 0, 10);
+  const total = points.reduce((t, p) => t + p.points, 0);
+  let score = noteSur10(total);
   if (v.views < VUES_MIN) score = Math.min(score, PLAFOND_PEU_DE_VUES);
   score = Math.round(score * 10) / 10;
 
@@ -116,7 +121,7 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
   return {
     score, label: labelOf(score), confiance, confianceRaison,
     raisons: reasons({ v, ratio, base, n: comp.length, vpd, mesuree, subs: opts.subs ?? null }),
-    points: points.map((p) => ({ ...p, points: Math.round(p.points * 10) / 10 })),
+    points: points.map((p) => ({ ...p, points: Math.round(p.points * 10) / 10 })), totalPoints: Math.round(total * 10) / 10,
     base: { median: base, n: comp.length, ratio },
     vuesParJour: vpd, vitesseMesuree: mesuree, engagement: likesParVue(v), ageJours: age, isShort: isShort(v),
   };
@@ -125,9 +130,9 @@ export function scoreVideo(v: Video, pool: Video[], opts: { now: number; snaps?:
 const fmtJours = (j: number) => (j < 30 ? `${Math.round(j)} j` : j < 365 ? `${Math.round(j / 30)} mois` : `${(Math.round(j / 36.5) / 10).toString().replace(".", ",")} an${j >= 730 ? "s" : ""}`);
 
 export function labelOf(score: number) {
-  if (score >= 8) return "Explose";
-  if (score >= 6.5) return "Très bonne";
-  if (score >= 5) return "Bonne";
+  if (score >= 9) return "Explose";
+  if (score >= 8) return "Très bonne";
+  if (score >= 6.5) return "Bonne";
   return "Normale";
 }
 

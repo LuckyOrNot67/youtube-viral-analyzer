@@ -19,7 +19,7 @@ test("une vidéo à 8× la normale de sa chaîne a un gros score, confiance haut
   const pool = channel();
   const hit = vid({ views: 400_000, age: 10 });
   const s = scoreVideo(hit, [...pool, hit], { now: NOW });
-  assert.ok(s.score >= 7, `score ${s.score}`);
+  assert.ok(s.score >= 9, `score ${s.score}`);
   assert.equal(s.confiance, "haute");
   assert.match(s.raisons[0], /les vues habituelles/);
 });
@@ -34,8 +34,8 @@ test("une vidéo dans la normale reste moyenne", () => {
   const pool = channel();
   const v = vid({ views: 50_000, age: 20 });
   const s = scoreVideo(v, [...pool, v], { now: NOW });
-  assert.ok(s.score < 5, `score ${s.score}`);
-  assert.equal(s.label, "Normale");
+  assert.ok(s.score < 8, `score ${s.score}`);
+  assert.notEqual(s.label, "Explose");
 });
 
 test("même rapport à la chaîne, mêmes points « d'habitude », mais la grosse chaîne part plus haut", () => {
@@ -57,7 +57,7 @@ test("le temps compte : 17,8 M en 2 mois passe devant 22,5 M en 2 ans et 17,2 M 
   const all = [...pool, deuxMois, unAn, deuxAns];
   const [a, b, c] = [deuxMois, unAn, deuxAns].map((v) => scoreVideo(v, all, { now: NOW }).score);
   assert.ok(a > b && a > c, `2 mois ${a}, 1 an ${b}, 2 ans ${c}`);
-  assert.ok(a > 5, `2 mois ${a}`);
+  assert.ok(a >= 8, `2 mois ${a}`);
 });
 
 test("une vidéo toute jeune n'est pas punie de ne pas encore avoir fait ses vues", () => {
@@ -65,7 +65,7 @@ test("une vidéo toute jeune n'est pas punie de ne pas encore avoir fait ses vue
   const v = vid({ channelId: "squeezie", views: 3_000_000, age: 1 });
   const s = scoreVideo(v, [...pool, v], { now: NOW });
   assert.ok(s.points.every((p) => p.points >= 0), JSON.stringify(s.points));
-  assert.ok(s.score >= 5, `score ${s.score}`);
+  assert.ok(s.score >= 7, `score ${s.score}`);
 });
 
 test("peu de vues : score plafonné même avec un énorme engagement", () => {

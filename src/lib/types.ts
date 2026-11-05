@@ -47,6 +47,8 @@ export type Score = {
   raisons: string[];
   /** Le barème : les points gagnés ou perdus sur chaque critère, pour « Comment c'est calculé ». */
   points: { critere: string; points: number; detail: string }[];
+  /** Somme des points, avant d'être transformée en note sur 10. */
+  totalPoints: number;
   base: { median: number | null; n: number; ratio: number | null };
   vuesParJour: number;
   /** Vitesse mesurée entre deux relevés (sinon moyenne depuis la publication). */
