@@ -386,7 +386,7 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
       {!res && !load && !surcharge && (
         <div className="story">
           <b className="story-t">Découper en histoires</b>
-          <p className="small">L&apos;IA trouve les histoires complètes de la vidéo et les coupe en parties qui donnent envie de voir la suite. Combien de temps par partie ?</p>
+          <p className="small">Toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l&apos;une après l&apos;autre. L&apos;IA repère où ça devient intéressant et coupe sur des fins de phrase. Chaque partie reprend les {LIMITES.histoires.recul} dernières secondes de la précédente. Combien de temps par partie ?</p>
           <div className="segmented" role="radiogroup" aria-label="Durée de chaque partie">
             {LIMITES.histoires.durees.map((d) => (
               <button key={d} role="radio" aria-checked={d === duree} className={d === duree ? "on" : ""} onClick={() => setDuree(d)}>{d / 60} min</button>
@@ -396,7 +396,7 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
         </div>
       )}
       {(res || load) && <div className="sec-head"><h2 className="h h-m">Histoires en <span className="it acc">parties</span></h2></div>}
-      {load && <Waiting since={t0} label="L'IA cherche les histoires… (1 à 3 min)" />}
+      {load && <Waiting since={t0} label="L'IA repère où couper… (1 à 3 min)" />}
       {err && <div className="notice bad" role="alert">{err}</div>}
       <ChoixFormat videoId={video.id} sorte="histoires" info={res?.format}>
         {res?.avertissement && <p className="sub">{res.avertissement}</p>}
@@ -412,7 +412,7 @@ function UneHistoire({ videoId, h, durees, depart, onSeek }: { videoId: string; 
   const [file, setFile] = useState<number[]>([]);
   const [finies, setFinies] = useState<Set<number>>(new Set());
   const [vue, setVue] = useState<number | null>(null);
-  const parties = decouper(h.start, h.end, h.suspense, cible);
+  const parties = decouper(h.start, h.end, h.suspense, cible, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
   const enCours = file.find((n) => !finies.has(n));
   const demander = (ns: number[]) => setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]);
   return (

@@ -3,69 +3,73 @@ import * as z from "zod/v4";
 import { cacheGet, cacheSet } from "../db";
 import { fmtTime } from "../parse";
 import type { Video } from "../types";
-import { bienFormes, GeminiSurcharge, geminiWatchYouTube, hasGemini, jsonIn } from "./models";
+import { GeminiSurcharge, geminiWatchYouTube, hasGemini, jsonIn } from "./models";
 import { DUREE_MAX_VIDEO } from "./extraits";
 import { lireAvecFormat, QUESTION_FORMAT } from "../format";
 import LIMITES from "@/config/limites.json";
 
-// Histoires en parties : Gemini regarde la vidéo par son lien, repère les histoires complètes (un récit, une anecdote,
-// un thread, une enquête…) et les moments où couper laisse le spectateur sur sa faim. Rien n'est inventé : une vidéo
-// sans histoire n'en donne pas.
+// Histoires en parties : toute la vidéo, découpée en parties qui se suivent (Partie 1, 2, 3…) à poster l'une après
+// l'autre. Gemini regarde la vidéo par son lien et dit seulement où elle devient intéressante (après le générique,
+// l'intro ou la pub), où elle se termine (avant la conclusion et l'écran de fin), et les fins de phrase où couper
+// proprement. Sans réponse de l'IA, la vidéo entière est coupée à intervalles réguliers : il y a toujours une histoire.
 
-const Brute = z.object({
-  start: z.number(), end: z.number(),
+const Serie = z.object({
+  debut: z.number(), fin: z.number(),
   titre: z.string(), resume: z.string(),
-  suspense: z.array(z.number()),
+  coupures: z.array(z.number()),
 });
 
 export type Histoire = { start: number; end: number; titre: string; resume: string; suspense: number[] };
 export type HistoiresResult = { histoires: Histoire[]; avertissement: string | null; creeLe: number };
 
+/** Clé du cache (« serie » : la découpe en parties qui se suivent, qui a remplacé les histoires complètes). */
+export const cleHistoires = (videoId: string) => `serie:${videoId}`;
+
 const prompt = (v: Video) => `Regarde cette vidéo YouTube en entier (« ${v.title} », ${fmtTime(v.duration)}).
-Trouve les histoires complètes qu'on peut poster en plusieurs parties sur TikTok (« Partie 1 », « Partie 2 »…) : un récit, une anecdote racontée, un thread, une enquête, une aventure, un drame, une histoire d'horreur.
+On va la poster sur TikTok en parties qui se suivent (« Partie 1 », « Partie 2 »…), de 1 à 3 minutes chacune, du premier moment intéressant jusqu'à la fin.
 
-Une bonne histoire :
-- a un début qui pose la situation et une fin qui conclut (pas coupée au milieu) ;
-- dure au moins ${Math.round(LIMITES.histoires.dureeMin / 60)} minutes ;
-- donne envie de connaître la suite.
-Si toute la vidéo est une seule histoire, donne-la en entier. S'il n'y a aucune histoire, donne une liste vide.
-
-Pour chaque histoire, donne les moments de suspense où couper : la fin d'une phrase juste avant une révélation, une question laissée en l'air, un rebondissement. Environ un toutes les 30 à 60 secondes.
+Donne :
+- "debut" : la seconde où la vidéo devient intéressante, après le générique, l'intro, les annonces ou la pub (0 si elle commence tout de suite) ;
+- "fin" : la seconde où le contenu se termine, avant la conclusion, les remerciements et l'écran de fin ;
+- "coupures" : les secondes où l'on peut couper proprement entre "debut" et "fin" (fin d'une phrase, petite pause, juste avant une révélation ou une question laissée en l'air). Il en faut beaucoup, une toutes les 20 à 30 secondes sur toute la durée : au moins ${Math.max(6, Math.round(v.duration / 30))} ;
+- "titre" : le titre de la série, 6 mots maximum, en français ;
+- "resume" : de quoi parle la vidéo, une phrase, en français.
 Règles : les minutages doivent correspondre à ce qu'on voit et entend réellement. N'invente rien.
 Dis aussi si la vidéo supporte d'être recadrée en vertical.
 Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 {${QUESTION_FORMAT},
-"histoires": [{"start": secondes (nombre), "end": secondes (nombre), "titre": "titre de l'histoire, 6 mots maximum, en français", "resume": "de quoi parle l'histoire, une phrase, en français", "suspense": [secondes, …]}]}`;
+"serie": {"debut": secondes, "fin": secondes, "coupures": [secondes, …], "titre": "…", "resume": "…"}}`;
 
 export async function findHistoires(v: Video): Promise<HistoiresResult> {
   if (v.duration > DUREE_MAX_VIDEO) throw new Error(`Vidéo trop longue (plus de ${DUREE_MAX_VIDEO / 3600} h).`);
-  const key = `histoires:${v.id}`;
+  const key = cleHistoires(v.id);
   const deja = cacheGet<HistoiresResult>(key);
   if (deja) return deja;
   const r = await compute(v);
-  // Un échec de l'IA n'est pas gardé : on pourra réessayer tout de suite.
-  if (r.ok) cacheSet(key, r.value, LIMITES.cache.extraitsHeures);
+  // Sans l'IA, la découpe régulière n'est gardée qu'une heure : on pourra réessayer et avoir des coupures propres.
+  cacheSet(key, r.value, r.ok ? LIMITES.cache.extraitsHeures : 1);
   return r.value;
 }
 
 async function compute(v: Video): Promise<{ ok: boolean; value: HistoiresResult }> {
   const creeLe = Date.now();
-  if (!hasGemini()) return { ok: false, value: { creeLe, histoires: [], avertissement: "Clé Gemini manquante : impossible de regarder la vidéo." } };
-  let brutes: z.infer<typeof Brute>[];
+  // Toujours une histoire : la vidéo entière, coupée à intervalles réguliers, si l'IA ne peut pas aider.
+  const reguliere = (avertissement: string) => ({ ok: false, value: { creeLe, avertissement, histoires: [{ start: 0, end: v.duration, titre: v.title.slice(0, 60), resume: "", suspense: [] }] } });
+  if (!hasGemini()) return reguliere("Clé Gemini manquante : parties coupées à intervalles réguliers.");
+  let s: z.infer<typeof Serie>;
   try {
-    brutes = bienFormes(lireAvecFormat(v.id, jsonIn(await geminiWatchYouTube(v.id, v.duration, prompt(v), v.id)), "histoires"), Brute);
+    const raw = jsonIn(await geminiWatchYouTube(v.id, v.duration, prompt(v), v.id));
+    lireAvecFormat(v.id, raw, "serie");
+    s = Serie.parse((raw as { serie?: unknown }).serie);
   } catch (e) {
     if (e instanceof GeminiSurcharge) throw e;
     console.warn("[histoires] Gemini :", (e as Error).message);
-    return { ok: false, value: { creeLe, histoires: [], avertissement: "La vidéo n'a pas pu être regardée par l'IA (vidéo privée, réservée aux adultes ou trop récente)." } };
+    return reguliere("L'IA n'a pas pu regarder la vidéo : les parties sont coupées à intervalles réguliers.");
   }
-  // Contrôles sans IA : dans la vidéo, assez longue, pas de doublon, suspense à l'intérieur de l'histoire.
-  const histoires = brutes
-    .map((h) => ({ ...h, start: Math.max(0, Math.round(h.start)), end: Math.min(v.duration, Math.round(h.end)) }))
-    .filter((h) => h.end - h.start >= LIMITES.histoires.dureeMin)
-    .filter((h, i, all) => !all.slice(0, i).some((o) => Math.min(o.end, h.end) - Math.max(o.start, h.start) > (h.end - h.start) / 2))
-    .map((h) => ({ ...h, suspense: h.suspense.map(Math.round).filter((t) => t > h.start && t < h.end).sort((a, b) => a - b) }))
-    .sort((a, b) => a.start - b.start);
-  console.info(`[histoires] ${v.id} : ${brutes.length} histoires proposées par l'IA, ${histoires.length} gardées`);
-  return { ok: true, value: { creeLe, histoires, avertissement: histoires.length ? null : "Pas d'histoire complète dans cette vidéo." } };
+  // Contrôles sans IA : début et fin dans la vidéo, assez de durée, coupures à l'intérieur.
+  let debut = Math.max(0, Math.round(s.debut)), fin = Math.min(v.duration, Math.round(s.fin));
+  if (fin - debut < LIMITES.histoires.dureeMin) { debut = 0; fin = v.duration; }
+  const coupures = [...new Set(s.coupures.map(Math.round))].filter((t) => t > debut && t < fin).sort((a, b) => a - b);
+  console.info(`[histoires] ${v.id} : de ${debut} s à ${fin} s, ${coupures.length} coupures`);
+  return { ok: true, value: { creeLe, avertissement: null, histoires: [{ start: debut, end: fin, titre: s.titre, resume: s.resume, suspense: coupures }] } };
 }

@@ -78,9 +78,10 @@
     "conservationJours": 7
   },
   "histoires": {
-    "_note": "Histoires en parties (Partie 1, 2, 3…) : l'IA trouve les histoires complètes d'une vidéo et les moments de suspense où couper. Chaque heure de vidéo découpée compte pour 1 sur le compteur histoires, toutes ses parties sont incluses.",
+    "_note": "Histoires = toute la vidéo en parties qui se suivent (Partie 1, 2, 3…), à poster l'une après l'autre. L'IA trouve où la vidéo devient intéressante, où elle se termine, et les fins de phrase où couper proprement. Chaque partie reprend les `recul` dernières secondes de la précédente. Chaque heure de vidéo découpée compte pour 1 sur le compteur histoires, toutes ses parties sont incluses.",
     "dureeMin": 120,
     "partieMax": 180,
+    "recul": 5,
     "durees": [
       60,
       120,

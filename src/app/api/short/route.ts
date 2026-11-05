@@ -4,7 +4,7 @@ import { exportesPour, hasDownloader, startShort } from "@/lib/short";
 import { videoDetail } from "@/lib/youtube/analyze";
 import { analyseDe, histoiresPayees, lotDe, passagesDe } from "@/lib/analyses";
 import { cacheGet } from "@/lib/db";
-import type { HistoiresResult } from "@/lib/ai/histoires";
+import { cleHistoires, type HistoiresResult } from "@/lib/ai/histoires";
 import type { Cadrage } from "@/lib/short";
 import { formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
@@ -31,7 +31,8 @@ export async function POST(req: Request) {
     const { videoId } = b.data;
     const start = Math.round(b.data.start), end = Math.round(b.data.end);
     const len = end - start, h = b.data.histoire;
-    const dureeMax = h ? LIMITES.histoires.partieMax : LIMITES.short.dureeMax;
+    // Une partie peut reprendre quelques secondes de la précédente.
+    const dureeMax = h ? LIMITES.histoires.partieMax + LIMITES.histoires.recul : LIMITES.short.dureeMax;
     if (len < LIMITES.short.dureeMin || len > dureeMax) throw new UserError(`${h ? "Une partie" : "Un Short"} doit durer entre ${LIMITES.short.dureeMin} et ${dureeMax} secondes.`);
     if (!hasDownloader()) throw new UserError("L'outil de téléchargement n'est pas installé sur le serveur (npm run setup).", 503);
     const { video } = await videoDetail(videoId);
@@ -62,9 +63,10 @@ export async function POST(req: Request) {
 
 /** Une partie d'histoire : incluse dès que la vidéo a été découpée en histoires, sans plafond de Shorts. */
 function partieHistoire(uid: string, video: { id: string; title: string }, o: { start: number; end: number; cadrage: Cadrage; titre: string; h: { partie: number; start: number; end: number } }): string {
-  const r = cacheGet<HistoiresResult>(`histoires:${video.id}`);
+  const r = cacheGet<HistoiresResult>(cleHistoires(video.id));
   const histoire = r?.histoires.find((x) => Math.abs(x.start - o.h.start) <= 1 && Math.abs(x.end - o.h.end) <= 1);
-  if (!r || !histoire || !histoiresPayees(uid, video.id, r.creeLe)) throw new UserError("Découpe d'abord cette vidéo en histoires (ou refais-le : c'est gardé 7 jours).");
+  // La découpe régulière de secours (sans IA) n'est pas décomptée : ses parties sont libres.
+  if (!r || !histoire || (!r.avertissement && !histoiresPayees(uid, video.id, r.creeLe))) throw new UserError("Découpe d'abord cette vidéo en histoires (ou refais-le : c'est gardé 7 jours).");
   if (o.start < histoire.start - 1 || o.end > histoire.end + 1) throw new UserError("Cette partie sort de l'histoire.");
   const titre = `${o.titre || histoire.titre} · Partie ${o.h.partie}`;
   const { job } = startShort({ videoId: video.id, start: o.start, end: o.end, cadrage: o.cadrage, uid, titre, videoTitre: video.title, autres: [], partie: o.h.partie });

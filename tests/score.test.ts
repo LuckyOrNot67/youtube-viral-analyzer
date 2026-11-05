@@ -164,6 +164,15 @@ test("histoire : parties coupées sur le suspense le plus proche de la durée ch
   assert.deepEqual(sans.map((x) => x.n), sans.map((_, i) => i + 1));
 });
 
+test("histoire : chaque partie reprend les 5 dernières secondes de la précédente", async () => {
+  const { decouper } = await import("../src/lib/decoupe.ts");
+  const p = decouper(30, 630, [90, 150, 210, 270, 330, 390, 450, 510, 570], 60, 180, 5);
+  assert.equal(p[0].start, 30);
+  for (let i = 1; i < p.length; i++) assert.equal(p[i].start, p[i - 1].end - 5, "reprise de 5 s");
+  assert.equal(p.at(-1)!.end, 630);
+  assert.ok(p.length >= 9);
+});
+
 test("histoire : en 1 min, pas de partie de 2 min même si le suspense est loin", async () => {
   const { decouper } = await import("../src/lib/decoupe.ts");
   const p = decouper(51, 643, [179, 311, 458, 614], 60);

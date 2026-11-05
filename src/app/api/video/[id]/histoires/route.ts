@@ -1,5 +1,5 @@
 import { cacheGet } from "@/lib/db";
-import { findHistoires, type HistoiresResult } from "@/lib/ai/histoires";
+import { cleHistoires, findHistoires, type HistoiresResult } from "@/lib/ai/histoires";
 import { videoDetail } from "@/lib/youtube/analyze";
 import { coutVideo, histoiresPayees, payerHistoires } from "@/lib/analyses";
 import { assertUsage, countUsage, formule } from "@/lib/quota";
@@ -21,7 +21,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const uid = await userId();
     const { video } = await videoDetail(id);
     if (video.s.isShort) throw new UserError("C'est déjà un Short : le découpage en histoires sert aux vidéos longues.");
-    const deja = cacheGet<HistoiresResult>(`histoires:${id}`);
+    const deja = cacheGet<HistoiresResult>(cleHistoires(id));
     const paye = deja ? histoiresPayees(uid, id, deja.creeLe) : false;
     const cout = coutVideo(video.duration);
     if (!paye) assertUsage(uid, "histoires", cout);
@@ -35,15 +35,15 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
         const send = (o: unknown) => { if (ouvert) try { ctl.enqueue(enc.encode(JSON.stringify(o) + "\n")); } catch { ouvert = false; } };
         const pouls = setInterval(() => send({ attente: true }), 15_000);
         // Le serveur réessaie déjà en arrière-plan : on ne relance pas Gemini une deuxième fois, l'écran attend.
-        if (relanceEnCours("histoires", id) && !cacheGet<HistoiresResult>(`histoires:${id}`)) {
+        if (relanceEnCours("histoires", id) && !cacheGet<HistoiresResult>(cleHistoires(id))) {
           clearInterval(pouls); send({ surcharge: true, email: emailPret() });
           if (ouvert) try { ctl.close(); } catch {}
           return;
         }
         try {
           const r = await findHistoires(video);
-          // On ne fait payer que si l'IA a trouvé au moins une histoire.
-          if (!histoiresPayees(uid, id, r.creeLe) && r.histoires.length) {
+          // On ne fait payer que la découpe faite par l'IA (pas la découpe régulière de secours).
+          if (!histoiresPayees(uid, id, r.creeLe) && !r.avertissement) {
             payerHistoires(uid, id);
             countUsage(uid, "histoires", cout);
           }

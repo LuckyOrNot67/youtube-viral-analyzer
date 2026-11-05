@@ -1,10 +1,11 @@
-// Découpe d'une histoire en parties (Partie 1, 2, 3…) : on coupe sur un moment de suspense proche de la durée
-// choisie, sinon pile à cette durée. Pur, pour être testé.
+// Découpe d'une vidéo en parties qui se suivent (Partie 1, 2, 3…) : on coupe sur une fin de phrase ou un moment de
+// suspense proche de la durée choisie, sinon pile à cette durée. Chaque partie reprend les dernières secondes de la
+// précédente (`recul`), pour que le spectateur qui passe à la suite retrouve où il en était. Pur, pour être testé.
 
 export type Partie = { n: number; start: number; end: number };
 
 /** `coupures` : secondes où couper laisse du suspense (fin de phrase, juste avant une révélation). */
-export function decouper(start: number, end: number, coupures: number[], cible: number, max = 180): Partie[] {
+export function decouper(start: number, end: number, coupures: number[], cible: number, max = 180, recul = 0): Partie[] {
   const min = Math.max(20, Math.round(cible * 0.5));
   const points = [...new Set(coupures.map(Math.round))].sort((a, b) => a - b);
   const parties: Partie[] = [];
@@ -21,5 +22,6 @@ export function decouper(start: number, end: number, coupures: number[], cible: 
     a = b;
   }
   parties.push({ n: parties.length + 1, start: a, end: fin });
-  return parties;
+  // La reprise : chaque partie (sauf la première) commence quelques secondes avant la fin de la précédente.
+  return parties.map((p, i) => (i === 0 ? p : { ...p, start: Math.max(Math.round(start), p.start - recul) }));
 }
