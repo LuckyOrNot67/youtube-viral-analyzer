@@ -6,8 +6,9 @@
 //   quand faire un écran coupé. Sa position n'est qu'indicative : on cadre sur le visage détecté le plus proche.
 // Chaque morceau est monté ainsi :
 // - « un » : plein écran vertical, le visage au milieu (il suit la personne si elle bouge) ;
-// - « duo » : écran coupé, une personne en haut, l'autre en bas ;
-// - « flou » : aucun visage à suivre, ou un plan large où tout le monde compte : l'image entière sur un fond flouté.
+// - « duo » : écran coupé, une personne en haut, l'autre en bas (deux personnes importantes trop éloignées pour un
+//   seul cadre vertical, même dans un plan large) ;
+// - « flou » : personne du tout à l'écran (texte, animation) : l'image entière sur un fond flouté.
 
 export type Mode = "un" | "duo" | "rien";
 /** Un changement noté par Gemini : à partir de `t` (secondes depuis le début du passage), le cadre suit `x` (0 à
@@ -111,18 +112,29 @@ export function morceaux(plans: Plan[], len: number, coupes: number[], phrases: 
     const ps = pistes(visages.filter((e) => e.t >= a && e.t <= b));
     const proche = (x: number) => [...ps].sort((p, q) => Math.abs(p.cx - x) - Math.abs(q.cx - x))[0];
     let m: Morceau;
+    const fixe = (mode: Morceau["mode"], x: number, y: number, x2 = x, y2 = y): Morceau => ({ a, b, mode, cles: [{ t: a, x, y, x2, y2 }] });
+    const yDe = (p: Piste) => mediane(p.pts.map((q) => q.y));
+    // Les personnes qui comptent : les plus grands visages (les plus près de la caméra), pas le public au fond.
+    const grand = Math.max(0, ...ps.map((p) => p.taille));
+    const importants = ps.filter((p) => p.taille >= grand * 0.6).sort((p, q) => q.taille - p.taille);
+    // Deux personnes trop éloignées pour tenir ensemble dans un cadre vertical (il couvre un tiers de la largeur).
+    const loin = importants.find((p) => Math.abs(p.cx - importants[0]?.cx) >= 0.3);
+    // Gemini a vraiment désigné quelqu'un (il met souvent 0,5 par défaut) : la personne détectée à cet endroit.
+    const designe = g?.mode === "un" && Math.abs(g.x - 0.5) > 0.1 ? ps.find((p) => Math.abs(p.cx - g.x) < 0.1) : undefined;
     if (!ps.length) {
-      m = { a, b, mode: "flou", cles: [{ t: a, x: 0.5, y: 0.5, x2: 0.5, y2: 0.5 }] };
-    } else if (g?.mode === "duo" && ps.length >= 2) {
+      // Aucun visage détecté (profil, dos, de loin) : Gemini voit quand même quelqu'un ? On cadre là où il le dit.
+      // Personne du tout (texte, animation) : l'image entière sur fond flouté.
+      m = g?.mode === "un" ? fixe("un", g.x, 0.4) : g?.mode === "duo" ? fixe("duo", Math.min(g.x, g.x2!), 0.4, Math.max(g.x, g.x2!), 0.4) : fixe("flou", 0.5, 0.5);
+    } else if (g?.mode === "duo" && ps.length >= 2 && !designe) {
       const h = proche(g.x), bas = proche(g.x2 ?? g.x) === h ? ps.find((p) => p !== h)! : proche(g.x2 ?? g.x);
-      m = { a, b, mode: "duo", cles: [{ t: a, x: h.cx, y: mediane(h.pts.map((q) => q.y)), x2: bas.cx, y2: mediane(bas.pts.map((q) => q.y)) }] };
-    } else if (g?.mode === "rien" || (!g && ps.length >= 3 && Math.max(...ps.map((p) => p.taille)) < 0.12)) {
-      // Rien à suivre selon Gemini, ou, sans son avis, un plan large de groupe : recadrer ferait perdre la scène.
-      // Avec son avis, un plan de groupe cadre sur la personne qui parle (cas suivant).
-      m = { a, b, mode: "flou", cles: [{ t: a, x: 0.5, y: 0.5, x2: 0.5, y2: 0.5 }] };
+      m = fixe("duo", h.cx, yDe(h), bas.cx, yDe(bas));
+    } else if (loin && !designe) {
+      // Deux personnes importantes éloignées (face à face, ou un plan large) : écran coupé, celle de gauche en haut.
+      const [h, bas] = [importants[0], loin].sort((p, q) => p.cx - q.cx);
+      m = fixe("duo", h.cx, yDe(h), bas.cx, yDe(bas));
     } else {
-      // La personne indiquée par Gemini, sinon le plus grand visage (le plus près de la caméra).
-      const p = g && g.mode === "un" ? proche(g.x) : [...ps].sort((p, q) => q.taille - p.taille)[0];
+      // Une seule personne qui compte (ou celle que Gemini désigne) : plein écran sur elle, en la suivant.
+      const p = designe ?? importants[0];
       m = { a, b, mode: "un", cles: suivre(p, a, b).map((k) => ({ ...k, x2: k.x, y2: k.y })) };
     }
     const prev = out.at(-1);
