@@ -59,8 +59,9 @@ export function choisir(uid: string, videoId: string, sorte: Sorte, f: Format): 
   return cadrageDe(uid, videoId, sorte);
 }
 
-/** Le cadrage qui s'applique : le choix de la personne, sinon le conseil de l'IA, sinon le plein écran vertical. */
-export const cadrageDe = (uid: string, videoId: string, sorte: Sorte): Format => choixDe(uid, videoId, sorte) ?? conseilDe(videoId)?.format ?? "vertical";
+/** Le cadrage qui s'applique : le choix de la personne, sinon le montage auto (il gère tous les cas : une personne,
+ *  deux, un plateau). « bandes » n'est plus proposé mais reste valable pour les choix déjà faits. */
+export const cadrageDe = (uid: string, videoId: string, sorte: Sorte): Format => choixDe(uid, videoId, sorte) ?? "auto";
 
 /** Ce que l'écran doit savoir : l'avis de l'IA, le choix fait et si on peut encore en changer. */
 export const formatPour = (uid: string, videoId: string, sorte: Sorte) => ({ conseil: conseilDe(videoId), choix: choixDe(uid, videoId, sorte), verrouille: verrouille(uid, videoId, sorte) });
