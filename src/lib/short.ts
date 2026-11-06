@@ -5,7 +5,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
-import { ffmpeg, probe, sceneCuts } from "./ai/ffmpeg";
+import { ffmpeg, probe, scenesDe } from "./ai/ffmpeg";
 import { logCost } from "./ai/events";
 import { db } from "./db";
 import { conseilDe } from "./format";
@@ -186,12 +186,15 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
     // plan, Gemini départage. Si Gemini ne répond pas, le montage se fait quand même.
     const phrases = (await montage().catch(() => [] as Phrase[]))
       .filter((p) => p.end > job.start && p.start < job.end).map((p) => ({ ...p, start: p.start - job.start, end: p.end - job.start }));
-    const [plans, coupes, visages] = await Promise.all([
+    const [plans, scenes, visages] = await Promise.all([
       planParPlan(job.videoId, job.start, job.end, input, offset, phrases).catch((e) => { console.warn("[short] montage auto :", (e as Error).message); return []; }),
-      sceneCuts(input, 0.15),
+      scenesDe(input),
       visagesDe(input, offset, len).catch((e) => { console.warn("[short]", (e as Error).message); return []; }),
     ]);
-    const ms = morceaux(plans, len, coupes.map((c) => c - offset).filter((c) => c > 0 && c < len), phrases.map((p) => p.start), visages);
+    // Les nets changements de plan, et tous les petits (pour caler sur l'image exacte ceux que seuls les visages trahissent).
+    const dansLePassage = scenes.map((x) => ({ ...x, t: x.t - offset })).filter((x) => x.t > 0 && x.t < len);
+    const coupes = dansLePassage.filter((x) => x.score >= 0.15).map((x) => x.t).filter((t, i, l) => i === 0 || t - l[i - 1] > 0.3);
+    const ms = morceaux(plans, len, coupes, phrases.map((p) => p.start), visages, dansLePassage.map((x) => x.t));
     console.info(`[short] ${job.videoId} montage auto : ${plans.length} notes de Gemini, ${coupes.length} plans, ${ms.length} morceaux (${ms.map((m) => `${m.a}:${m.mode}`).join(" ")})`);
     filtre = filtreMontage(ms);
   }

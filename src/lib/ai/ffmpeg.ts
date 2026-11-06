@@ -32,7 +32,16 @@ export async function probe(file: string) {
   return { duration: d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : 0, hasAudio: /Stream #.*Audio: (aac|mp3|opus|pcm|alac|ac3|vorbis|flac)/.test(log) };
 }
 
-/** Moments des changements de plan (détection de scène) : sert à mesurer le rythme d'une vidéo et au montage auto.
+/** Chaque image qui change un peu du tout au tout (détection de scène) et à quel point (0 à 1). Le montage auto s'en
+ *  sert pour caler un changement de cadre sur l'image exacte où le plan change. */
+export async function scenesDe(file: string, seuil = 0.05): Promise<{ t: number; score: number }[]> {
+  const log = await ffmpeg(["-i", file, "-vf", `select='gt(scene,${seuil})',metadata=print`, "-an", "-f", "null", "-"], undefined, true).catch(() => "");
+  const out: { t: number; score: number }[] = [];
+  for (const m of log.matchAll(/pts_time:([\d.]+)[\s\S]*?lavfi\.scene_score=([\d.]+)/g)) out.push({ t: Number(m[1]), score: Number(m[2]) });
+  return out;
+}
+
+/** Moments des changements de plan (détection de scène) : sert à mesurer le rythme d'une vidéo.
  *  `seuil` plus bas : trouve aussi les changements entre deux plans de mêmes couleurs (et quelques faux). */
 export async function sceneCuts(file: string, seuil = 0.25): Promise<number[]> {
   const log = await ffmpeg(["-i", file, "-vf", `select='gt(scene,${seuil})',showinfo`, "-an", "-f", "null", "-"], undefined, true).catch(() => "");

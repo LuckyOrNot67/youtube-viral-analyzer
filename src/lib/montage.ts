@@ -25,6 +25,8 @@ const moyenne = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.le
 
 /** La zone dont le milieu est le plus proche du visage. */
 const coteDe = (x: number): "gauche" | "centre" | "droite" => (x < 0.375 ? "gauche" : x > 0.625 ? "droite" : "centre");
+/** Images par seconde du Short (le filtre FFmpeg commence par fps=30). */
+const IPS = 30;
 /** Le centre de chaque zone plein écran, dans la largeur de l'image. */
 export const CENTRES = { gauche: 0.25, centre: 0.5, droite: 0.75 } as const;
 
@@ -59,9 +61,10 @@ export function coupesVisages(ech: Echantillon[], coupes: number[]): number[] {
 }
 
 /** Les morceaux du passage (durée `len`). Tout est en secondes depuis le début du passage : `coupes`, les vrais
- *  changements de plan ; `phrases`, les débuts de phrase ; `vu`, ce que voit et entend le détecteur. */
-export function morceaux(plans: Plan[], len: number, coupes: number[], phrases: number[], vu: Echantillon[]): Morceau[] {
-  const vues = [...coupes, ...coupesVisages(vu, coupes)].sort((a, b) => a - b).filter((c, i, l) => i === 0 || c - l[i - 1] > 0.3);
+ *  changements de plan ; `phrases`, les débuts de phrase ; `vu`, ce que voit et entend le détecteur ; `fines`, toutes
+ *  les images qui changent un peu (pour caler à l'image près les changements de plan vus aux visages). */
+export function morceaux(plans: Plan[], len: number, coupes: number[], phrases: number[], vu: Echantillon[], fines: number[] = coupes): Morceau[] {
+  const vues = [...coupes, ...coupesVisages(vu, fines)].sort((a, b) => a - b).filter((c, i, l) => i === 0 || c - l[i - 1] > 0.3);
   const bords = [0, ...vues.filter((c) => c > 0.3 && c < len - 0.3), len];
   // Une voix : nettement au-dessus du bruit de fond habituel du passage.
   const sons = vu.map((e) => e.voix ?? 0).filter((v) => v > 0);
@@ -75,7 +78,11 @@ export function morceaux(plans: Plan[], len: number, coupes: number[], phrases: 
       if (prev && (prev.mode === m.mode || m.b - m.a < 0.3)) prev.b = m.b; else out.push(m);
     }
   }
-  return out.map((m) => ({ ...m, a: round(m.a), b: round(m.b) }));
+  // Chaque changement est calé sur la grille du Short (30 images/s) : la première image qui montre le nouveau plan
+  // (FFmpeg prend l'image source la plus proche), moins une demi-image. Sinon, une image du nouveau plan s'afficherait
+  // dans l'ancienne zone (ou l'inverse) : un flash.
+  const avant = (t: number) => Math.round((Math.round(t * IPS) - 0.5) / IPS * 1000) / 1000;
+  return out.map((m, i) => ({ ...m, a: i ? avant(m.a) : 0, b: i < out.length - 1 ? avant(m.b) : round(m.b) }));
 
   /** Un plan de la caméra [a, b] : quelle zone, et quand ça change. */
   function plan(a: number, b: number): Morceau[] {
@@ -157,7 +164,7 @@ export function filtreMontage(ms: Morceau[]): string {
   // Haut/bas : chaque moitié de l'image (gauche en haut, droite en bas), un peu rognée en hauteur pour faire 1080×960.
   const moitie = (cote: 0 | 1, nom: string) => `crop=w=min(iw/2\\,ih*9/8):h=min(iw/2\\,ih*9/8)*8/9:x=${cote ? "iw-ow" : "0"}:y=(ih-oh)*0.35,scale=1080:960,setsar=1[${nom}]`;
   return [
-    "[0:v]fps=30,split=3[s0][s1][s2]",
+    `[0:v]fps=${IPS},split=3[s0][s1][s2]`,
     `[s0]crop=w=min(iw\\,ih*9/16):h=ih:x=max(0\\,min(iw-ow\\,(${x})*iw-ow/2)),scale=1080:1920,setsar=1[plein]`,
     `[s1]${moitie(0, "haut")}`,
     `[s2]${moitie(1, "bas")}`,

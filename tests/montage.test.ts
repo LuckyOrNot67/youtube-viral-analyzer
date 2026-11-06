@@ -20,7 +20,7 @@ const gauche = 0.25, droite = 0.78;
 
 test("morceaux : la zone de celle qui parle (gauche, droite), et on bascule quand l'autre répond", () => {
   const visages = [...vus(0, 4, [{ x: gauche, parle: true }, { x: droite }]), ...vus(4, 8, [{ x: gauche }, { x: droite, parle: true }])];
-  assert.deepEqual(morceaux([], 8, [], [], visages).map((m) => [m.a, m.mode]), [[0, "gauche"], [4, "droite"]]);
+  assert.deepEqual(morceaux([], 8, [], [], visages).map((m) => [m.a, m.mode]), [[0, "gauche"], [3.983, "droite"]]);
 });
 
 test("morceaux : les deux côtés parlent en même temps : haut et bas ; personne ne parle : là où sont les gens", () => {
@@ -33,7 +33,7 @@ test("morceaux : le public du fond ne compte pas ; sans parole, la zone suit une
   const publicFond = [0.8, 0.9].map((x) => ({ x, h: 0.2, parle: true }));
   assert.deepEqual(morceaux([], 4, [], [], vus(0, 4, [{ x: 0.5, parle: true }, ...publicFond])).map((m) => m.mode), ["centre"]);
   const marche = [...vus(0, 3, [{ x: 0.2 }], 0), ...vus(3, 6, [{ x: 0.8 }], 0)];
-  assert.deepEqual(morceaux([], 6, [], [], marche).map((m) => [m.a, m.mode]), [[0, "gauche"], [2.9, "droite"]]);
+  assert.deepEqual(morceaux([], 6, [], [], marche).map((m) => [m.a, m.mode]), [[0, "gauche"], [2.883, "droite"]]);
 });
 
 test("morceaux : pas de ping-pong, il faut 1,5 s pour changer de zone", () => {
