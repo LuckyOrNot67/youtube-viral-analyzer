@@ -10,12 +10,16 @@ import { motsDe, sousTitres } from "@/lib/sous-titres";
 import { formule } from "@/lib/quota";
 import { fail, UserError, userId, VIDEO_ID } from "@/lib/http";
 import { cadrageDe } from "@/lib/format";
+import { CLIP_ID, estClip } from "@/lib/sources";
+import { clipDetail } from "@/lib/twitch";
+import { transcrire } from "@/lib/ai/transcription";
 import LIMITES from "@/config/limites.json";
 
 export const runtime = "nodejs";
 
 const Body = z.object({
-  videoId: z.string().regex(VIDEO_ID),
+  /** Une vidéo YouTube, ou un clip Twitch (« tc_… »). */
+  videoId: z.string().refine((id) => VIDEO_ID.test(id) || CLIP_ID.test(id)),
   start: z.number().min(0),
   end: z.number().positive(),
   /** Ignoré : le cadrage vient du choix fait pour les Shorts ou les histoires de la vidéo, sinon du conseil de l'IA. */
@@ -25,6 +29,8 @@ const Body = z.object({
   histoire: z.object({ partie: z.number().int().min(1), start: z.number().min(0), end: z.number().positive(), duree: z.number().int().positive().optional() }).optional(),
   /** Sous-titres animés mot par mot : le style, et la langue (celle de la vidéo, ou traduits en français). */
   sousTitres: z.object({ style: z.enum(["classique", "pop", "neon"]), langue: z.enum(["orig", "fr"]) }).optional(),
+  /** Clip Twitch : le rendu choisi sur la page (pour YouTube, il est gardé par vidéo, voir format.ts). */
+  rendu: z.enum(["auto", "vertical", "horizontal"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -32,6 +38,7 @@ export async function POST(req: Request) {
     const b = Body.safeParse(await req.json().catch(() => null));
     if (!b.success) { console.warn("[short] demande invalide :", b.error.message); throw new UserError("Demande d'export invalide."); }
     const { videoId } = b.data;
+    if (estClip(videoId)) return NextResponse.json({ id: await clipTwitch(b.data) });
     const start = Math.round(b.data.start), end = Math.round(b.data.end);
     const len = end - start, h = b.data.histoire;
     // Une partie peut reprendre quelques secondes de la précédente.
@@ -78,5 +85,21 @@ function partieHistoire(uid: string, video: { id: string; title: string }, o: { 
   if (o.start < histoire.start - 1 || o.end > histoire.end + 1) throw new UserError("Cette partie sort de l'histoire.");
   const titre = `${o.titre || histoire.titre} · Partie ${o.h.partie}`;
   const { job } = startShort({ videoId: video.id, start: o.start, end: o.end, cadrage: o.cadrage, uid, titre, videoTitre: video.title, autres: [], partie: o.h.partie, montage: o.montage, sousTitres: o.sousTitres });
+  return job.id;
+}
+
+/** Un clip Twitch entier, monté en Short : le rendu choisi, les sous-titres dictés par l'IA (pas de sous-titres sur
+ *  Twitch). Un Short par clip. */
+async function clipTwitch(d: z.infer<typeof Body>): Promise<string> {
+  if (!hasDownloader()) throw new UserError("L'outil de téléchargement n'est pas installé sur le serveur (npm run setup).", 503);
+  const clip = await clipDetail(d.videoId);
+  if (clip.duree < 3) throw new UserError("Ce clip est trop court.");
+  const uid = await userId();
+  const cadrage: Cadrage = d.rendu === "vertical" ? "centre" : d.rendu ?? "auto";
+  const st: SousTitresDemande | undefined = d.sousTitres ? {
+    ...d.sousTitres,
+    mots: ({ fichier, offset, len, start }) => transcrire(d.videoId, fichier, offset, len).then((ms) => ms.map((m) => ({ ...m, t: m.t + start, fin: m.fin + start }))),
+  } : undefined;
+  const { job } = startShort({ videoId: d.videoId, start: 0, end: clip.duree, cadrage, uid, titre: d.titre ?? clip.titre, videoTitre: clip.chaine ? `${clip.chaine} sur Twitch` : "Clip Twitch", autres: [], montage: cadrage === "auto" ? async () => [] : undefined, sousTitres: st });
   return job.id;
 }

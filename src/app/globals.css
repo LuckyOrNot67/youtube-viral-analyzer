@@ -360,3 +360,14 @@ details.more summary { padding: 4px 2px; }
 .st-apercu.neon { text-transform: none; font-size: 11.5px; }
 .st-apercu.neon i { color: #d9f56b; font-size: 13px; }
 .st-apercu.aucun { color: rgba(255,255,255,.5); font-weight: 500; }
+
+/* YouTube ou Twitch : deux versions de l'app, chacune avec sa couleur de marque en touche */
+.source { display: inline-flex; align-self: flex-start; gap: 4px; padding: 4px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+.source a { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.source a.on { background: var(--ink); color: var(--ink-text); }
+.pastille { width: 9px; height: 9px; border-radius: 3px; }
+.pastille.yt { background: #ff0033; }
+.pastille.tw { background: #9146ff; }
+.tw-acc { color: #9146ff; }
+[data-theme="dark"] .tw-acc { color: #b48cff; }
+.feat.f2.tw { background: #9146ff; }

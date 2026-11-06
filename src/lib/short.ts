@@ -13,6 +13,7 @@ import { planParPlan } from "./ai/montage-ia";
 import { filtreMontage, morceaux } from "./montage";
 import type { Phrase } from "./sous-titres";
 import { visagesDe } from "./visages";
+import { estClip, urlClip } from "./sources";
 import { fichierAss, type MotST, type StyleST } from "./captions";
 import { enFrancais } from "./ai/traduction";
 import { writeFile } from "node:fs/promises";
@@ -38,8 +39,9 @@ export const hasDownloader = () => existsSync(YTDLP);
 export type Cadrage = "centre" | "entier" | "horizontal" | "bandes" | "auto";
 /** Pour le montage auto : les sous-titres de la vidéo (qui parle, et quand). */
 export type InfosMontage = () => Promise<Phrase[]>;
-/** Sous-titres animés : le style, la langue, et les mots minutés de la vidéo (depuis son début). */
-export type SousTitresDemande = { style: StyleST; langue: "orig" | "fr"; mots: () => Promise<MotST[]> };
+/** Sous-titres animés : le style, la langue, et les mots minutés de la vidéo (depuis son début). `mots` reçoit le
+ *  passage téléchargé : sans sous-titres (Twitch), on le fait écouter à l'IA. */
+export type SousTitresDemande = { style: StyleST; langue: "orig" | "fr"; mots: (p: { fichier: string; offset: number; len: number; start: number }) => Promise<MotST[]> };
 type Etat = "attente" | "telechargement" | "montage" | "pret" | "erreur";
 export type ShortJob = {
   id: string; videoId: string; start: number; end: number; cadrage: Cadrage;
@@ -53,6 +55,8 @@ const jobs = (g.__yvaJobs ??= new Map());
 const enCours = (g.__yvaDl ??= new Map());
 
 export const fileOf = (id: string) => path.join(DIR, `${id}.mp4`);
+/** Où télécharger la vidéo : un clip Twitch (« tc_… »), sinon une vidéo YouTube. */
+const sourceDe = (videoId: string) => (estClip(videoId) ? urlClip(videoId) : `https://www.youtube.com/watch?v=${videoId}`);
 const marge = (p: Passage) => ({ from: Math.max(0, p.start - 1), to: p.end + 1 });
 const cle = (p: Passage) => { const { from, to } = marge(p); return `${from}-${to}`; };
 const sourceOf = (videoId: string, p: Passage) => path.join(SOURCES, videoId, `${cle(p)}.mp4`);
@@ -157,7 +161,7 @@ async function telecharger(videoId: string, passages: Passage[]) {
       ...passages.flatMap((p) => { const { from, to } = marge(p); return ["--download-sections", `*${from}-${to}`]; }),
       "--merge-output-format", "mp4", "--remux-video", "mp4",
       "--ffmpeg-location", ffmpegPath as unknown as string,
-      "-o", path.join(dir, "%(section_start)s-%(section_end)s.%(ext)s"), `https://www.youtube.com/watch?v=${videoId}`,
+      "-o", path.join(dir, "%(section_start)s-%(section_end)s.%(ext)s"), sourceDe(videoId),
     ]);
     let { code, err } = await essai();
     if (code !== 0 && !/not a bot|sign in to confirm|private video|unavailable|members-only/i.test(err)) {
@@ -210,7 +214,7 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage, sou
   }
   if (sousTitres) {
     // Sous-titres animés : les mots du passage (traduits si demandé), dessinés par-dessus l'image finale.
-    const mots = (await sousTitres.mots().catch(() => [] as MotST[]))
+    const mots = (await sousTitres.mots({ fichier: input, offset, len, start: job.start }).catch((e) => { console.warn("[short] sous-titres :", (e as Error).message); return [] as MotST[]; }))
       .filter((m) => m.t >= job.start - 0.2 && m.t < job.end).map((m) => ({ ...m, t: Math.max(0, m.t - job.start), fin: Math.min(len, m.fin - job.start) }));
     const dits = sousTitres.langue === "fr" ? await enFrancais(mots, `${job.videoId}:${job.start}-${job.end}`).catch(() => mots) : mots;
     if (dits.length) {
@@ -245,12 +249,14 @@ function downloadError(err: string): string {
   return "Le téléchargement du passage a échoué. Réessaie dans un instant.";
 }
 
-export function ytdlp(args: string[]): Promise<{ code: number | null; err: string }> {
+/** Lance yt-dlp. `out` : ce qu'il écrit sur sa sortie (les fiches JSON avec -j), `err` : la fin de son journal. */
+export function ytdlp(args: string[]): Promise<{ code: number | null; err: string; out: string }> {
   return new Promise((resolve, reject) => {
     const p = spawn(YTDLP, args);
-    let err = "";
+    let err = "", out = "";
+    p.stdout.on("data", (d: Buffer) => { out += d.toString(); });
     p.stderr.on("data", (d: Buffer) => { err = (err + d.toString()).slice(-4000); });
-    p.on("close", (code) => resolve({ code, err }));
+    p.on("close", (code) => resolve({ code, err, out }));
     p.on("error", reject);
   });
 }

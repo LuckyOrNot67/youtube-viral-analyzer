@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { SearchBox } from "@/components/SearchBox";
 import { EXEMPLES } from "@/lib/exemples";
+import { Source } from "@/components/Source";
 
 export default function Home() {
   return (
     <section className="hero">
-      <span className="mono dim">• YouTube → Shorts</span>
+      <Source actif="youtube" />
       <h1 className="h h-xl">Trouve la vidéo qui <span className="it">explose.</span></h1>
       <p className="sub" style={{ maxWidth: "40ch" }}>Une chaîne, un sujet ou un lien. Tu vois ce qui cartonne, et l&apos;IA te sort les passages à couper.</p>
       <SearchBox autoFocus />

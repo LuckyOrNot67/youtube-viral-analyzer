@@ -53,7 +53,7 @@ export default function MesShorts() {
               </div>
               <div className="meta">
                 <b>{x.titre || "Short"}</b>
-                <Link href={`/video/${x.videoId}`} className="small" style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{x.videoTitre}</Link>
+                <Link href={x.videoId.startsWith("tc_") ? `https://clips.twitch.tv/${x.videoId.slice(3)}` : `/video/${x.videoId}`} className="small" style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{x.videoTitre}</Link>
                 <span className="time dim">{fmtDur(x.start)} → {fmtDur(x.end)} · {x.cadrage === "centre" ? "plein écran" : "image entière"}</span>
               </div>
               {x.etat === "pret" && x.fichier && <a className="btn lime sm" href={`/api/short/${x.id}?fichier=1&telecharger=1`} download><Download size={15} /> Télécharger</a>}
