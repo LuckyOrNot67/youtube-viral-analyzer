@@ -2,18 +2,17 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpen, Check, Copy, Download, Flame, Loader2, Scissors, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { BookOpen, Check, Copy, Download, Flame, Loader2, Scissors, Sparkles, X } from "lucide-react";
 import { fmtAge, fmtDur, fmtNum, fmtScore, punch, ScoreBadge } from "@/components/bits";
 import { Cover } from "@/components/Cover";
 import type { Channel, Extrait, MomentCite, ScoredVideo } from "@/lib/types";
 import { decouper } from "@/lib/decoupe";
 import LIMITES from "@/config/limites.json";
 
-// Page d'une vidéo. Sur ordinateur, deux colonnes : à gauche la vidéo YouTube (elle reste à l'écran quand on descend,
-// pour regarder un passage sans perdre sa place), le titre et le score ; à droite l'espace de travail, en deux
-// onglets (Shorts, Histoires). Sur téléphone, tout s'empile. Créer un Short se passe dans sa tuile : rien ne bouge
-// autour, la vidéo prête se lit à la place de la couverture.
+// Page d'une vidéo, en une seule colonne qui défile d'un bloc : la vidéo, son titre et son score, puis deux onglets
+// (Shorts, Histoires). Regarder un passage l'ouvre dans une fenêtre par-dessus la page : on ne perd pas sa place.
+// Créer un Short se passe dans sa tuile : rien ne bouge autour, la vidéo prête se lit à la place de la couverture.
 
 type Detail = { video: ScoredVideo; channel: Channel; voisines: ScoredVideo[] };
 type Moment = MomentCite;
@@ -70,33 +69,29 @@ export default function VideoPage() {
   const { id } = useParams<{ id: string }>();
   const [d, setD] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [play, setPlay] = useState<{ start: number; end?: number; n: number } | null>(null);
+  const [apercu, setApercu] = useState<{ start: number; end?: number } | null>(null);
   const [onglet, setOnglet] = useState<Sorte>("shorts");
-  const playerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api<Detail>(`/api/video/${id}`).then(setD).catch((e) => setErr(e.message));
   }, [id]);
 
-  const seek = (start: number, end?: number) => {
-    setPlay((p) => ({ start, end, n: (p?.n ?? 0) + 1 }));
-    // Sur ordinateur la vidéo reste à l'écran ; sur téléphone on remonte jusqu'à elle.
-    if (window.matchMedia("(max-width: 959px)").matches) playerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  const seek = (start: number, end?: number) => setApercu({ start, end });
 
   if (err) return <div className="notice bad" role="alert" style={{ marginTop: 16 }}>{err}</div>;
-  if (!d) return <div className="vp"><div className="vp-side"><div className="skeleton" style={{ aspectRatio: "16/9" }} /></div><div className="vp-main"><div className="skeleton" style={{ height: 320 }} /></div></div>;
+  if (!d) return <div className="col" style={{ gap: 12, paddingTop: 12 }}><div className="skeleton" style={{ aspectRatio: "16/9" }} /><div className="skeleton" style={{ height: 160 }} /></div>;
 
   const { video: v, channel } = d;
   const s = v.s;
-  const src = `https://www.youtube-nocookie.com/embed/${v.id}?rel=0&playsinline=1${play ? `&autoplay=1&start=${play.start}${play.end ? `&end=${play.end}` : ""}` : ""}`;
+  const src = `https://www.youtube-nocookie.com/embed/${v.id}?rel=0&playsinline=1`;
 
   return (
     <div className="vp">
-      <aside className="vp-side">
-        <div ref={playerRef} className="player" style={{ scrollMarginTop: 70 }}>
-          <iframe key={play?.n ?? 0} src={src} title={v.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
-        </div>
+      {apercu && <Apercu videoId={v.id} titre={v.title} {...apercu} onClose={() => setApercu(null)} />}
+      <div className="player">
+        <iframe src={src} title={v.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
+      </div>
+      <div className="vp-head">
         <div className="col" style={{ gap: 6 }}>
           <h1 className="vp-title">{v.title}</h1>
           <Link href={`/resultats?q=${encodeURIComponent(channel.id)}`} className="row small" style={{ gap: 8 }}>
@@ -115,7 +110,7 @@ export default function VideoPage() {
             <div className="crit total"><span>Total</span><span className="dim">{s.totalPoints !== undefined ? `${fmtScore(s.totalPoints)} points, ramenés à une note sur 10` : ""}</span><span className="p">{fmtScore(s.score)}/10</span></div>
           </div>
         </details>
-      </aside>
+      </div>
 
       <section className="vp-main">
         {s.isShort ? (
@@ -146,6 +141,30 @@ export default function VideoPage() {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+/** Un passage, lu dans une fenêtre par-dessus la page : on le regarde sans perdre sa place. Échap ou un clic à côté
+ *  la ferme. */
+function Apercu({ videoId, titre, start, end, onClose }: { videoId: string; titre: string; start: number; end?: number; onClose: () => void }) {
+  useEffect(() => {
+    const touche = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", touche);
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", touche); document.body.style.overflow = ""; };
+  }, [onClose]);
+  return (
+    <div className="apercu" role="dialog" aria-modal="true" aria-label={`Passage à ${fmtDur(start)}`} onClick={onClose}>
+      <div className="apercu-in" onClick={(e) => e.stopPropagation()}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <span className="small" style={{ color: "#fff" }}>Passage {fmtDur(start)}{end ? ` → ${fmtDur(end)}` : ""}</span>
+          <button className="icon-btn" onClick={onClose} aria-label="Fermer" autoFocus><X size={18} /></button>
+        </div>
+        <div className="player">
+          <iframe src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&autoplay=1&start=${start}${end ? `&end=${end}` : ""}`} title={titre} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
+        </div>
+      </div>
     </div>
   );
 }
