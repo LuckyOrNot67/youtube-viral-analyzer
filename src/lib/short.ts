@@ -10,9 +10,9 @@ import { logCost } from "./ai/events";
 import { db } from "./db";
 import { conseilDe } from "./format";
 import { planParPlan } from "./ai/montage-ia";
-import { filtreMontage, morceaux } from "./montage";
+import { filtreMontage, filtreWebcam, morceaux } from "./montage";
 import type { Phrase } from "./sous-titres";
-import { visagesDe } from "./visages";
+import { visagesDe, webcamDe } from "./visages";
 import { estClip, urlClip } from "./sources";
 import { fichierAss, type MotST, type StyleST } from "./captions";
 import { enFrancais } from "./ai/traduction";
@@ -187,14 +187,23 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage, sou
   job.progression = 0.4;
 
   job.etat = "montage";
-  const { duration, hasAudio } = await probe(input);
+  const { duration, hasAudio, largeur, hauteur } = await probe(input);
   // Le passage téléchargé commence ~1 s avant ; on recale précisément sur le début demandé.
   const len = job.end - job.start;
   const offset = Math.max(0, Math.min(job.start - marge(source).from, Math.max(0, duration - len)));
   const centreX = conseilDe(job.videoId)?.centreX;
   let filtre = verticalFilter(job.cadrage === "auto" ? "bandes" : job.cadrage, centreX);
   let duos: { a: number; b: number }[] = [];
-  if (job.cadrage === "auto" && montage) {
+  // Stream de jeu : une webcam incrustée se met entière en haut du Short, le jeu en dessous (Montage auto, et aussi
+  // Short fixe pour un clip Twitch).
+  const cam = job.cadrage === "auto" || (estClip(job.videoId) && job.cadrage === "centre") ? await webcamDe(input, offset, len) : null;
+  let separation: number | undefined;
+  if (cam) {
+    const w = filtreWebcam(cam, { largeur, hauteur });
+    filtre = w.filtre;
+    separation = w.hautCam;
+    console.info(`[short] ${job.videoId} webcam en haut : ${cam.map((v) => v.toFixed(3)).join(" ")}`);
+  } else if (job.cadrage === "auto" && montage) {
     // Montage auto : le détecteur trouve les personnes (corps, tête, qui parle, qui bouge), FFmpeg les changements de
     // plan, Gemini départage. Si Gemini ne répond pas, le montage se fait quand même.
     const phrases = (await montage().catch(() => [] as Phrase[]))
@@ -220,7 +229,7 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage, sou
     if (dits.length) {
       const horizontal = job.cadrage === "horizontal";
       const ass = `${fileOf(job.id)}.ass`;
-      await writeFile(ass, fichierAss(dits, sousTitres.style, { largeur: horizontal ? 1920 : 1080, hauteur: horizontal ? 1080 : 1920, milieu: (t) => duos.some((d) => t >= d.a && t < d.b) }));
+      await writeFile(ass, fichierAss(dits, sousTitres.style, { largeur: horizontal ? 1920 : 1080, hauteur: horizontal ? 1080 : 1920, milieu: (t) => separation !== undefined || duos.some((d) => t >= d.a && t < d.b), ySeparation: separation }));
       const echappe = (f: string) => f.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
       filtre = `${filtre.replace(/\[vout\]$/, "[v0]")};[v0]ass=filename=${echappe(ass)}:fontsdir=${echappe(POLICES)}[vout]`;
     }

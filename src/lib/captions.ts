@@ -58,8 +58,8 @@ const propre = (s: string) => s.replace(/[{}\\]/g, "").replace(/\s+/g, " ").trim
 const JAUNE = "&H2EE6FF&", CITRON = "&H6BF5D9&", BLANC = "&HFFFFFF&";
 
 /** Le fichier de sous-titres. `milieu(t)` : vrai quand l'image est coupée en deux (haut/bas) : les sous-titres se
- *  placent alors sur la séparation, au milieu de l'écran. */
-export function fichierAss(tous: MotST[], style: StyleST, o: { largeur: number; hauteur: number; milieu?: (t: number) => boolean }): string {
+ *  placent alors sur la séparation (au milieu de l'écran, ou à `ySeparation` : sous la webcam d'un stream). */
+export function fichierAss(tous: MotST[], style: StyleST, o: { largeur: number; hauteur: number; milieu?: (t: number) => boolean; ySeparation?: number }): string {
   // Sans les annotations des sous-titres automatiques : « [Musique] », « [Applaudissements] », « [Cri] »…
   const mots = tous.map((m) => ({ ...m, mot: m.mot.replace(/\[[^\]]*\]?|\]/g, "").trim() })).filter((m) => m.mot);
   const vertical = o.hauteur > o.largeur;
@@ -68,7 +68,8 @@ export function fichierAss(tous: MotST[], style: StyleST, o: { largeur: number; 
   const police = style === "pop" ? "Poppins Black" : "Poppins ExtraBold";
   // Assez haut pour ne pas passer sous les boutons et la légende de TikTok.
   const bas = vertical ? Math.round(o.hauteur * 0.7) : Math.round(o.hauteur * 0.88);
-  const pos = (t: number) => (o.milieu?.(t) ? `\\an5\\pos(${o.largeur / 2},${o.hauteur / 2})` : `\\an2\\pos(${o.largeur / 2},${bas})`);
+  const sep = o.ySeparation ?? o.hauteur / 2;
+  const pos = (t: number) => (o.milieu?.(t) ? `\\an5\\pos(${o.largeur / 2},${sep})` : `\\an2\\pos(${o.largeur / 2},${bas})`);
   const ev: string[] = [];
   const dial = (a: number, b: number, texte: string) => ev.push(`Dialogue: 0,${temps(a)},${temps(b)},Base,,0,0,0,,${texte}`);
 

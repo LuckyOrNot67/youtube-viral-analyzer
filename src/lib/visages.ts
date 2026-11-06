@@ -30,3 +30,17 @@ export function visagesDe(fichier: string, debut: number, duree: number): Promis
     p.on("error", reject);
   });
 }
+
+const WEBCAM = path.join(process.cwd(), "scripts/webcam.py");
+
+/** La webcam incrustée dans le passage (stream de jeu) : [x, y, largeur, hauteur] entre 0 et 1, ou null. */
+export function webcamDe(fichier: string, debut: number, duree: number): Promise<[number, number, number, number] | null> {
+  if (!hasVisages()) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const p = spawn(PYTHON, [WEBCAM, fichier, YUNET, debut.toFixed(2), String(duree)]);
+    let out = "";
+    p.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+    p.on("close", () => { try { resolve(JSON.parse(out).box ?? null); } catch { resolve(null); } });
+    p.on("error", () => resolve(null));
+  });
+}

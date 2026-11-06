@@ -172,3 +172,23 @@ export function filtreMontage(ms: Morceau[]): string {
     `[plein][duo]overlay=enable=${duo},setsar=1[vout]`,
   ].join(";");
 }
+
+/** Stream de jeu : la webcam entière en haut, le jeu en dessous (milieu de l'image). `box` : la webcam dans l'image
+ *  source, entre 0 et 1 ; `src` : la taille de l'image source. Rend le filtre et la hauteur de la webcam dans le Short
+ *  (les sous-titres se posent sur la séparation). */
+export function filtreWebcam(box: [number, number, number, number], src: { largeur: number; hauteur: number }): { filtre: string; hautCam: number } {
+  // Un peu à l'intérieur du cadre, pour ne pas garder sa bordure.
+  const m = 0.004, [x, y, w, h] = [box[0] + m, box[1] + m, box[2] - 2 * m, box[3] - 2 * m];
+  const hautCam = Math.min(860, Math.max(560, Math.round(1080 * (h * src.hauteur) / (w * src.largeur) / 2) * 2));
+  const hautJeu = 1920 - hautCam;
+  const f = (n: number) => n.toFixed(4);
+  return {
+    hautCam,
+    filtre: [
+      `[0:v]fps=${IPS},split=2[c][j]`,
+      `[c]crop=w=iw*${f(w)}:h=ih*${f(h)}:x=iw*${f(x)}:y=ih*${f(y)},scale=1080:${hautCam}:force_original_aspect_ratio=increase,crop=1080:${hautCam},setsar=1[cam]`,
+      `[j]crop=w=min(iw\\,ih*1080/${hautJeu}):h=ih:x=(iw-ow)/2:y=0,scale=1080:${hautJeu},setsar=1[jeu]`,
+      "[cam][jeu]vstack,setsar=1[vout]",
+    ].join(";"),
+  };
+}

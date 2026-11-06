@@ -29,7 +29,12 @@ function run(args: string[], onTime?: (sec: number) => void, complet = false): P
 export async function probe(file: string) {
   const { log } = await run(["-i", file, "-map", "0:v:0", "-f", "null", "-t", "0", "-"]).catch(() => ({ log: "" }));
   const d = log.match(/Duration: (\d+):(\d+):([\d.]+)/);
-  return { duration: d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : 0, hasAudio: /Stream #.*Audio: (aac|mp3|opus|pcm|alac|ac3|vorbis|flac)/.test(log) };
+  const taille = log.match(/Stream #.*Video: .*?, (\d{2,5})x(\d{2,5})/);
+  return {
+    duration: d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : 0,
+    hasAudio: /Stream #.*Audio: (aac|mp3|opus|pcm|alac|ac3|vorbis|flac)/.test(log),
+    largeur: taille ? Number(taille[1]) : 1920, hauteur: taille ? Number(taille[2]) : 1080,
+  };
 }
 
 /** Chaque image qui change un peu du tout au tout (détection de scène) et à quel point (0 à 1). Le montage auto s'en
