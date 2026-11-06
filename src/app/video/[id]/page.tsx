@@ -252,10 +252,51 @@ function Cadrage({ videoId, sorte, info, cree }: { videoId: string; sorte: Sorte
   );
 }
 
+/** Sous-titres animés mot par mot : un style (ou aucun), et la langue (celle de la vidéo, ou traduits en français). */
+type StyleST = "classique" | "pop" | "neon" | "aucun";
+type SousTitres = { style: StyleST; langue: "orig" | "fr" };
+const STYLES: { s: StyleST; nom: string }[] = [
+  { s: "classique", nom: "Classique" },
+  { s: "pop", nom: "Pop" },
+  { s: "neon", nom: "Néon" },
+  { s: "aucun", nom: "Aucun" },
+];
+
+/** Le choix des sous-titres, avec un aperçu de chaque style. La langue n'est proposée que pour une vidéo étrangère. */
+function ChoixSousTitres({ valeur, onChange, langueVideo }: { valeur: SousTitres; onChange: (v: SousTitres) => void; langueVideo: string | null }) {
+  const etrangere = Boolean(langueVideo) && !langueVideo!.toLowerCase().startsWith("fr");
+  return (
+    <div className="cadrage">
+      <span className="small"><b style={{ color: "var(--text)" }}>Sous-titres</b> · mot par mot, comme sur TikTok</span>
+      <div className="st-opts" role="radiogroup" aria-label="Sous-titres">
+        {STYLES.map((o) => (
+          <button key={o.s} type="button" role="radio" aria-checked={valeur.style === o.s} className={`st-opt${valeur.style === o.s ? " on" : ""}`} onClick={() => onChange({ ...valeur, style: o.s })}>
+            <span className={`st-apercu ${o.s}`} aria-hidden>
+              <span>
+                {o.s === "classique" && <>C&apos;EST <i>LE</i> TALENT</>}
+                {o.s === "pop" && <i>TALENT</i>}
+                {o.s === "neon" && <>c&apos;est <i>le</i> talent</>}
+                {o.s === "aucun" && <>—</>}
+              </span>
+            </span>
+            <b>{o.nom}</b>
+          </button>
+        ))}
+      </div>
+      {etrangere && valeur.style !== "aucun" && (
+        <div className="segmented" role="radiogroup" aria-label="Langue des sous-titres">
+          <button role="radio" aria-checked={valeur.langue === "orig"} className={valeur.langue === "orig" ? "on" : ""} onClick={() => onChange({ ...valeur, langue: "orig" })}>Langue de la vidéo</button>
+          <button role="radio" aria-checked={valeur.langue === "fr"} className={valeur.langue === "fr" ? "on" : ""} onClick={() => onChange({ ...valeur, langue: "fr" })}>Traduits en français</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Job = { etat: "attente" | "telechargement" | "montage" | "pret" | "erreur"; progression: number; erreur: string | null };
 type PartieDe = { partie: number; start: number; end: number; duree?: number };
 /** Ce qu'il faut pour créer un Short : le passage, son titre, sa légende, et pour une partie d'histoire, l'histoire. */
-type Demande = { start: number; end: number; titre: string; legende?: string | null; histoire?: PartieDe };
+type Demande = { start: number; end: number; titre: string; legende?: string | null; histoire?: PartieDe; sousTitres?: SousTitres };
 
 /** Une tuile 9:16 : la couverture, puis la création en cours par-dessus, puis la vidéo prête à sa place. Elle garde
  *  toujours la même taille : rien ne bouge autour. */
@@ -284,9 +325,10 @@ function Creation({ videoId, demande, couverture, onFin }: { videoId: string; de
   useEffect(() => { if (fini) onFin?.(); }, [fini]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { start, end, titre, histoire } = demande;
+  const st = demande.sousTitres && demande.sousTitres.style !== "aucun" ? demande.sousTitres : undefined;
   useEffect(() => {
     setErr(null); setJob(null);
-    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, titre, histoire }) })
+    api<{ id: string }>("/api/short", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId, start, end, titre, histoire, sousTitres: st }) })
       .then(({ id }) => setJob({ id, j: { etat: "attente", progression: 0, erreur: null } }))
       .catch((x) => setErr(x.message));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `histoire` est recréé à chaque rendu, ses valeurs sont start/end
@@ -345,6 +387,9 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   const [t0, setT0] = useState(0);
   const [etape, setEtape] = useState<Etape | null>(null);
   const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
+  const [st, setSt] = useState<SousTitres>({ style: "classique", langue: "fr" });
+  // Les sous-titres choisis au moment de créer chaque Short (changer de style ensuite ne refait pas les Shorts lancés).
+  const [stDe, setStDe] = useState<Record<number, SousTitres>>({});
 
   // `discret` : vérification en arrière-plan pendant que Gemini est surchargé, sans repasser par l'écran d'attente.
   const run = useCallback(async (discret = false) => {
@@ -369,6 +414,7 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
   return (
     <div className="col" style={{ gap: 16 }}>
       <Cadrage videoId={video.id} sorte="shorts" info={res?.format} cree={demandes.size > 0} />
+      <ChoixSousTitres valeur={st} onChange={setSt} langueVideo={video.lang} />
       {surcharge && state === "idle" && <SurchargeCarte videoId={video.id} sorte="shorts" email={surcharge.email} onRetry={run} />}
       {state === "idle" && !surcharge && (
         <div className="panel">
@@ -403,8 +449,8 @@ function Extraits({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, e
                 onVoir={() => { setVu(i); onSeek(x.start, x.end); }}
                 haut={<><span className="tc">{fmtDur(x.start)}</span>{x.note !== null && <span className="stk lime">{fmtScore(x.note)}<small>/10</small></span>}</>}
                 titre={x.couverture} bas={<span className="tc">{fmtDur(x.end - x.start)}</span>}
-                demande={demandes.has(i) ? { start: x.start, end: x.end, titre: x.titre, legende: x.legende } : null}
-                onCreer={() => setDemandes(new Set(demandes).add(i))} />
+                demande={demandes.has(i) ? { start: x.start, end: x.end, titre: x.titre, legende: x.legende, sousTitres: stDe[i] } : null}
+                onCreer={() => { setStDe({ ...stDe, [i]: st }); setDemandes(new Set(demandes).add(i)); }} />
             ))}
           </div>
         </>
@@ -433,6 +479,7 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   const [duree, setDuree] = useState(possibles[0] ?? 60);
   const [surcharge, setSurcharge] = useState<Surcharge | null>(null);
   const [cree, setCree] = useState(false);
+  const [st, setSt] = useState<SousTitres>({ style: "classique", langue: "fr" });
   const run = useCallback((discret = false) => {
     if (!discret) { setLoad(true); setErr(null); setT0(Date.now()); setSurcharge(null); }
     flux<HistoiresRes>(`/api/video/${video.id}/histoires`)
@@ -453,6 +500,7 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
   return (
     <div className="col" style={{ gap: 16 }}>
       <Cadrage videoId={video.id} sorte="histoires" info={res?.format} cree={cree} />
+      <ChoixSousTitres valeur={st} onChange={setSt} langueVideo={video.lang} />
       {surcharge && !load && !res && <SurchargeCarte videoId={video.id} sorte="histoires" email={surcharge.email} onRetry={run} />}
       {!res && !load && !surcharge && (
         <div className="panel">
@@ -467,20 +515,26 @@ function Histoires({ video, onSeek }: { video: ScoredVideo; onSeek: (s: number, 
       {err && <div className="notice bad" role="alert">{err}</div>}
       {res?.avertissement && <p className="small">{res.avertissement}</p>}
       {res && <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}><span className="small"><b style={{ color: "var(--text)" }}>Durée de chaque partie</b></span>{choixDuree}</div>}
-      {res?.histoires.map((h) => <UneHistoire key={`${duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={duree} onSeek={onSeek} onCree={() => setCree(true)} />)}
+      {res?.histoires.map((h) => <UneHistoire key={`${duree}-${h.start}-${h.end}`} videoId={video.id} h={h} duree={duree} st={st} onSeek={onSeek} onCree={() => setCree(true)} />)}
     </div>
   );
 }
 
-function UneHistoire({ videoId, h, duree, onSeek, onCree }: { videoId: string; h: Histoire; duree: number; onSeek: (s: number, e?: number) => void; onCree: () => void }) {
+function UneHistoire({ videoId, h, duree, st, onSeek, onCree }: { videoId: string; h: Histoire; duree: number; st: SousTitres; onSeek: (s: number, e?: number) => void; onCree: () => void }) {
   // Les parties demandées, dans l'ordre : une seule se crée à la fois, les autres attendent leur tour.
   const [file, setFile] = useState<number[]>([]);
   const [finies, setFinies] = useState<Set<number>>(new Set());
   const [vue, setVue] = useState<number | null>(null);
+  // Les sous-titres choisis au moment où chaque partie est demandée.
+  const [stDe, setStDe] = useState<Record<number, SousTitres>>({});
   // Les coupures notées par l'IA pour cette durée ; sinon on recoupe chez nous sur ses moments de suspense.
   const parties = h.decoupes?.[String(duree)] ?? h.parties ?? decouper(h.start, h.end, h.suspense, duree, LIMITES.histoires.partieMax, LIMITES.histoires.recul);
   const enCours = file.find((n) => !finies.has(n));
-  const demander = (ns: number[]) => { onCree(); setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]); };
+  const demander = (ns: number[]) => {
+    onCree();
+    setStDe((d) => ({ ...Object.fromEntries(ns.map((n) => [n, st])), ...d }));
+    setFile((f) => [...f, ...ns.filter((n) => !f.includes(n))]);
+  };
   return (
     <div className="col" style={{ gap: 12 }}>
       <div className="sec-head">
@@ -497,7 +551,7 @@ function UneHistoire({ videoId, h, duree, onSeek, onCree }: { videoId: string; h
           <Tuile key={p.n} videoId={videoId} decale={DECALAGES[p.n % DECALAGES.length]} actif={vue === p.n}
             onVoir={() => { setVue(p.n); onSeek(p.start, p.end); }}
             haut={<span className="tc">Partie {p.n}</span>} titre={<span className="part-big">Partie {p.n}</span>} bas={<span className="tc">{fmtDur(p.end - p.start)}</span>}
-            demande={finies.has(p.n) || enCours === p.n ? { start: p.start, end: p.end, titre: h.titre, histoire: { partie: p.n, start: h.start, end: h.end, duree }, legende: legendePartie(h.titre, p.n, parties.length) } : null}
+            demande={finies.has(p.n) || enCours === p.n ? { start: p.start, end: p.end, titre: h.titre, histoire: { partie: p.n, start: h.start, end: h.end, duree }, legende: legendePartie(h.titre, p.n, parties.length), sousTitres: stDe[p.n] } : null}
             attente={file.includes(p.n)} onCreer={() => demander([p.n])}
             onFin={() => setFinies((f) => new Set(f).add(p.n))} />
         ))}

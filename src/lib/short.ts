@@ -13,6 +13,9 @@ import { planParPlan } from "./ai/montage-ia";
 import { filtreMontage, morceaux } from "./montage";
 import type { Phrase } from "./sous-titres";
 import { visagesDe } from "./visages";
+import { fichierAss, type MotST, type StyleST } from "./captions";
+import { enFrancais } from "./ai/traduction";
+import { writeFile } from "node:fs/promises";
 import LIMITES from "@/config/limites.json";
 
 // Export d'un Short vertical à partir d'un passage d'une vidéo YouTube : yt-dlp télécharge seulement les passages
@@ -27,12 +30,16 @@ const YTDLP = process.env.YTDLP_PATH ?? path.join(process.cwd(), ".cache/ytdlp/b
 const DIR = path.join(process.cwd(), ".cache", "shorts");
 const SOURCES = path.join(process.cwd(), ".cache", "sources");
 const KEEP_MS = LIMITES.analyse.conservationJours * 86400_000;
+/** Les polices des sous-titres animés (Poppins, licence libre). */
+const POLICES = path.join(process.cwd(), "assets", "fonts");
 
 export const hasDownloader = () => existsSync(YTDLP);
 
 export type Cadrage = "centre" | "entier" | "horizontal" | "bandes" | "auto";
 /** Pour le montage auto : les sous-titres de la vidéo (qui parle, et quand). */
 export type InfosMontage = () => Promise<Phrase[]>;
+/** Sous-titres animés : le style, la langue, et les mots minutés de la vidéo (depuis son début). */
+export type SousTitresDemande = { style: StyleST; langue: "orig" | "fr"; mots: () => Promise<MotST[]> };
 type Etat = "attente" | "telechargement" | "montage" | "pret" | "erreur";
 export type ShortJob = {
   id: string; videoId: string; start: number; end: number; cadrage: Cadrage;
@@ -88,16 +95,17 @@ export function exportesPour(uid: string, videoId: string): Passage[] {
 }
 
 /** Un même passage déjà demandé par la même personne n'est pas refait. `autres` : les passages à télécharger dans la foulée. */
-export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; partie?: number; montage?: InfosMontage }): { job: ShortJob; nouveau: boolean } {
-  const row = db().prepare("SELECT id FROM shorts WHERE user = ? AND video = ? AND start = ? AND end = ? AND cadrage = ? AND at > ? AND etat != 'erreur'")
-    .get(o.uid, o.videoId, o.start, o.end, o.cadrage, Date.now() - KEEP_MS) as { id: string } | undefined;
+export function startShort(o: { videoId: string; start: number; end: number; cadrage: Cadrage; uid: string; titre: string; videoTitre: string; autres: Passage[]; partie?: number; montage?: InfosMontage; sousTitres?: SousTitresDemande }): { job: ShortJob; nouveau: boolean } {
+  const st = o.sousTitres ? `${o.sousTitres.style}:${o.sousTitres.langue}` : "";
+  const row = db().prepare("SELECT id FROM shorts WHERE user = ? AND video = ? AND start = ? AND end = ? AND cadrage = ? AND sous_titres = ? AND at > ? AND etat != 'erreur'")
+    .get(o.uid, o.videoId, o.start, o.end, o.cadrage, st, Date.now() - KEEP_MS) as { id: string } | undefined;
   const same = row && getJob(row.id);
   if (same && same.etat !== "erreur" && (same.etat !== "pret" || existsSync(fileOf(same.id)))) return { job: same, nouveau: false };
   const job: ShortJob = { id: randomUUID(), videoId: o.videoId, start: o.start, end: o.end, cadrage: o.cadrage, uid: o.uid, etat: "attente", progression: 0, erreur: null, createdAt: Date.now() };
   jobs.set(job.id, job);
-  db().prepare("INSERT INTO shorts (id, user, video, start, end, cadrage, titre, video_titre, etat, erreur, at, partie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'attente', NULL, ?, ?)")
-    .run(job.id, o.uid, o.videoId, o.start, o.end, o.cadrage, o.titre.slice(0, 200), o.videoTitre.slice(0, 200), job.createdAt, o.partie ?? null);
-  run(job, o.autres, o.montage)
+  db().prepare("INSERT INTO shorts (id, user, video, start, end, cadrage, titre, video_titre, etat, erreur, at, partie, sous_titres) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'attente', NULL, ?, ?, ?)")
+    .run(job.id, o.uid, o.videoId, o.start, o.end, o.cadrage, o.titre.slice(0, 200), o.videoTitre.slice(0, 200), job.createdAt, o.partie ?? null, st);
+  run(job, o.autres, o.montage, o.sousTitres)
     .catch((e) => { job.etat = "erreur"; job.erreur = (e as Error).message; console.warn("[short]", (e as Error).message); })
     .finally(() => db().prepare("UPDATE shorts SET etat = ?, erreur = ? WHERE id = ?").run(job.etat, job.erreur, job.id));
   cleanup().catch(() => {});
@@ -166,7 +174,7 @@ async function telecharger(videoId: string, passages: Passage[]) {
   await fin;
 }
 
-async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
+async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage, sousTitres?: SousTitresDemande) {
   const t0 = Date.now();
   await mkdir(DIR, { recursive: true });
   job.etat = "telechargement";
@@ -181,6 +189,7 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
   const offset = Math.max(0, Math.min(job.start - marge(source).from, Math.max(0, duration - len)));
   const centreX = conseilDe(job.videoId)?.centreX;
   let filtre = verticalFilter(job.cadrage === "auto" ? "bandes" : job.cadrage, centreX);
+  let duos: { a: number; b: number }[] = [];
   if (job.cadrage === "auto" && montage) {
     // Montage auto : le détecteur trouve les personnes (corps, tête, qui parle, qui bouge), FFmpeg les changements de
     // plan, Gemini départage. Si Gemini ne répond pas, le montage se fait quand même.
@@ -197,6 +206,21 @@ async function run(job: ShortJob, autres: Passage[], montage?: InfosMontage) {
     const ms = morceaux(plans, len, coupes, phrases.map((p) => p.start), visages, dansLePassage.map((x) => x.t));
     console.info(`[short] ${job.videoId} montage auto : ${plans.length} notes de Gemini, ${coupes.length} plans, ${ms.length} morceaux (${ms.map((m) => `${m.a}:${m.mode}`).join(" ")})`);
     filtre = filtreMontage(ms);
+    duos = ms.filter((m) => m.mode === "duo");
+  }
+  if (sousTitres) {
+    // Sous-titres animés : les mots du passage (traduits si demandé), dessinés par-dessus l'image finale.
+    const mots = (await sousTitres.mots().catch(() => [] as MotST[]))
+      .filter((m) => m.t >= job.start - 0.2 && m.t < job.end).map((m) => ({ ...m, t: Math.max(0, m.t - job.start), fin: Math.min(len, m.fin - job.start) }));
+    const dits = sousTitres.langue === "fr" ? await enFrancais(mots, `${job.videoId}:${job.start}-${job.end}`).catch(() => mots) : mots;
+    if (dits.length) {
+      const horizontal = job.cadrage === "horizontal";
+      const ass = `${fileOf(job.id)}.ass`;
+      await writeFile(ass, fichierAss(dits, sousTitres.style, { largeur: horizontal ? 1920 : 1080, hauteur: horizontal ? 1080 : 1920, milieu: (t) => duos.some((d) => t >= d.a && t < d.b) }));
+      const echappe = (f: string) => f.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+      filtre = `${filtre.replace(/\[vout\]$/, "[v0]")};[v0]ass=filename=${echappe(ass)}:fontsdir=${echappe(POLICES)}[vout]`;
+    }
+    console.info(`[short] ${job.videoId} sous-titres ${sousTitres.style}/${sousTitres.langue} : ${dits.length} mots`);
   }
   await ffmpeg([
     "-ss", offset.toFixed(2), "-i", input, "-t", String(len),

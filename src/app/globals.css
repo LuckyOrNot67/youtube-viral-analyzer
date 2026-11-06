@@ -345,3 +345,18 @@ details.more summary { padding: 4px 2px; }
 .tuile-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .tuile-actions .btn.sm { padding: 8px 12px; }
 .part-big { font-size: 26px; letter-spacing: -0.04em; }
+
+/* Sous-titres : quatre styles, chacun avec un petit aperçu sur fond d'image sombre */
+.st-opts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.st-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 6px 8px; border-radius: 16px; border: 2px solid var(--line); background: var(--surface); min-width: 0; transition: border-color .15s ease; }
+.st-opt b { font-size: 13px; font-weight: 600; }
+.st-opt:hover { border-color: color-mix(in srgb, var(--text) 35%, var(--line)); }
+.st-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.st-apercu { width: 100%; height: 44px; border-radius: 10px; display: grid; place-items: center; padding: 0 4px; background: linear-gradient(160deg, #2b2f4a, #141018); color: #fff; font-weight: 800; font-size: 11px; letter-spacing: -0.01em; text-align: center; line-height: 1.1; overflow: hidden; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 3px #000; }
+.st-apercu i { font-style: normal; }
+.st-apercu.classique i { color: #ffe62e; }
+.st-apercu.pop { font-size: 17px; font-weight: 900; }
+.st-apercu.pop i { color: #ffe62e; }
+.st-apercu.neon { text-transform: none; font-size: 11.5px; }
+.st-apercu.neon i { color: #d9f56b; font-size: 13px; }
+.st-apercu.aucun { color: rgba(255,255,255,.5); font-weight: 500; }

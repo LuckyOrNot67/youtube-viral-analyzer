@@ -9,7 +9,7 @@ import LIMITES from "@/config/limites.json";
 const FILE = path.join(process.cwd(), ".cache", "data.db");
 
 // Changer SCHEMA quand on ajoute une table : la connexion déjà ouverte (serveur de dev) recrée alors les tables.
-const SCHEMA = 6;
+const SCHEMA = 7;
 const g = globalThis as unknown as { __yvaDb?: DatabaseSync; __yvaSchema?: number };
 
 export function db(): DatabaseSync {
@@ -33,6 +33,8 @@ export function db(): DatabaseSync {
   `);
   // Colonnes ajoutées après coup (l'erreur « colonne déjà là » est normale).
   try { d.exec("ALTER TABLE shorts ADD COLUMN partie INTEGER"); } catch {}
+  // Le style et la langue des sous-titres animés (« pop:fr »), vide sans sous-titres.
+  try { d.exec("ALTER TABLE shorts ADD COLUMN sous_titres TEXT NOT NULL DEFAULT ''"); } catch {}
   g.__yvaDb = d;
   g.__yvaSchema = SCHEMA;
   return d;
